@@ -1,0 +1,19 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Session LinkedIn, prospects, historique d'envoi et logs (propres à chaque Mac)
+linkedin_data/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.tmp
+
+# macOS / éditeurs
+.DS_Store
+.idea/
+.vscode/
