@@ -76,13 +76,16 @@ EOF
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
 fi
 
-cat <<EOF
-
-✅ Installation terminée.
-
-Étapes suivantes :
-  1. Remplis .env (clé Resend + e-mail de destination)
-  2. Connecte-toi à LinkedIn :  .venv/bin/python linkedin_connect.py login
-  3. Premier test :             .venv/bin/python linkedin_connect.py find --pages 1
-                                .venv/bin/python linkedin_connect.py run --dry-run
-EOF
+echo
+echo "✅ Installation terminée."
+STEPS=""
+grep -qE '^RESEND_API_KEY=.+' .env && grep -qE '^NOTIFY_EMAIL=.+' .env \
+  || STEPS+="  • Remplis .env (clé Resend + e-mail de destination)\n"
+[ -d linkedin_data/.profile ] \
+  || STEPS+="  • Connecte-toi à LinkedIn :  .venv/bin/python linkedin_connect.py login\n"
+if [ -n "$STEPS" ]; then
+  printf "\nÉtapes suivantes :\n%b" "$STEPS"
+  echo "  • Premier test :             .venv/bin/python linkedin_connect.py run --dry-run"
+else
+  echo "   Tout est configuré. Journal : tail -f linkedin_data/auto.log"
+fi
