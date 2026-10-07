@@ -30,7 +30,7 @@ cd Linkedin-connector
 ```
 
 Le script crée l'environnement Python, installe Chromium et planifie l'exécution
-**du lundi au vendredi à 10h30**. Autre horaire : `HOUR=9 MINUTE=0 ./install.sh`.
+**du lundi au vendredi à 10h30, et au démarrage du Mac** (rattrapage, voir plus bas). Autre horaire : `HOUR=9 MINUTE=0 ./install.sh`.
 Sans planification : `./install.sh --no-schedule`.
 
 Ensuite :
@@ -66,8 +66,24 @@ Chaque jour ouvré, `linkedin_connect.py auto` :
 3. envoie jusqu'à 15 invitations, meilleurs scores d'abord ;
 4. envoie un rapport e-mail (ou une alerte ⚠️ si la session a expiré ou si LinkedIn bloque).
 
-Une fenêtre Chromium s'ouvre pendant ~30–45 min : ne la ferme pas. Le Mac doit être
-allumé (s'il est en veille à l'heure prévue, la tâche se lance au réveil).
+Une fenêtre Chromium s'ouvre pendant ~30–45 min : ne la ferme pas.
+
+**Aucun jour manqué** : la tâche se déclenche à 10h30 *et* à chaque démarrage du Mac
+(ouverture de session). Elle vérifie d'abord si elle a déjà tourné aujourd'hui
+(`linkedin_data/last_auto_run.txt`) :
+
+| Situation | Comportement |
+|---|---|
+| Mac allumé à 10h30 | exécution à 10h30 |
+| Mac éteint à 10h30, allumé à 14h | exécution au démarrage, à 14h |
+| Mac démarré à 8h | exécution à 8h, celle de 10h30 est ignorée |
+| Mac en veille à 10h30 | exécution au réveil |
+| Week-end | rien |
+| Pas de réseau au démarrage | attend jusqu'à 3 min, sinon réessaie au prochain déclenchement |
+| Session LinkedIn expirée | e-mail d'alerte, réessaie au prochain déclenchement |
+
+Pour forcer une exécution (même déjà faite aujourd'hui ou le week-end) :
+`.venv/bin/python linkedin_connect.py auto --force`
 
 | Action | Commande |
 |---|---|
@@ -88,7 +104,7 @@ allumé (s'il est en veille à l'heure prévue, la tâche se lance au réveil).
 | `find` | Recherche de personnes → `linkedin_data/prospects.csv` | `--segments founder,sales` · `--keywords "..."` · `--pages 2` · `--paris` · `--network S,O` |
 | `enrich` | Vérifie la date du dernier post des meilleurs prospects | `--top 30` |
 | `run` | Envoie les invitations, meilleurs scores d'abord | `--limit 15` · `--dry-run` · `--active-only` · `--note` · `--min-score 40` |
-| `auto` | Pipeline complet + e-mail (utilisé par la tâche planifiée) | `--limit` · `--enrich` · `--note` |
+| `auto` | Pipeline complet + e-mail, une fois par jour ouvré (utilisé par la tâche planifiée) | `--force` · `--limit` · `--enrich` · `--note` |
 | `rescore` | Recalcule les scores après modification des règles | |
 
 Segments disponibles : `founder`, `pme`, `sales`, `growth`, `entrepreneur`.
@@ -132,6 +148,7 @@ Tout reste en local dans `linkedin_data/` (ignoré par git) :
 | `prospects.csv` | prospects, score, raison du score, statut d'envoi |
 | `sent_log.csv` | historique des invitations (sert aux plafonds) |
 | `auto.log` | journal des exécutions automatiques |
+| `last_auto_run.txt` | date de la dernière exécution automatique réussie |
 | `.profile/` | session du navigateur |
 
 Colonne `status` : `sent`, `pending`, `no_connect_button` (déjà connecté ou profil

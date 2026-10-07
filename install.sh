@@ -37,7 +37,7 @@ fi
 
 # ── Tâche planifiée (launchd) ─────────────────────────────────────────────────
 if [ "${1:-}" != "--no-schedule" ]; then
-  echo "→ Tâche planifiée : lundi–vendredi à ${HOUR}h$(printf %02d "$MINUTE")"
+  echo "→ Tâche planifiée : lundi–vendredi à ${HOUR}h$(printf %02d "$MINUTE") + au démarrage du Mac"
   mkdir -p "$HOME/Library/LaunchAgents"
   {
     cat <<EOF
@@ -53,6 +53,8 @@ if [ "${1:-}" != "--no-schedule" ]; then
     <string>auto</string>
   </array>
   <key>WorkingDirectory</key><string>$DIR</string>
+  <!-- Au démarrage / à l'ouverture de session : rattrape la journée si besoin -->
+  <key>RunAtLoad</key><true/>
   <key>StartCalendarInterval</key>
   <array>
 EOF

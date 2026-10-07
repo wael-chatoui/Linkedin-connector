@@ -14,7 +14,8 @@ Pipeline:
     python linkedin_connect.py run --dry-run              # preview, best scores first
     python linkedin_connect.py run --limit 15 --active-only
     python linkedin_connect.py run --limit 5 --note       # with personalised note
-    python linkedin_connect.py auto                       # daily pipeline + email report (launchd)
+    python linkedin_connect.py auto                       # daily pipeline + email report (launchd),
+                                                          # once per weekday, catches up at login
 
 Targets: founders / CEOs / owners of startups & SMEs, sales & growth leaders —
 people who could hire a freelance full-stack / automation / AI developer.
@@ -25,6 +26,7 @@ import argparse
 import csv
 import random
 import re
+import socket
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -40,6 +42,7 @@ DATA_DIR = Path(__file__).parent / "linkedin_data"
 PROFILE_DIR = DATA_DIR / ".profile"
 PROSPECTS_CSV = DATA_DIR / "prospects.csv"
 LOG_FILE = DATA_DIR / "sent_log.csv"
+LAST_RUN_FILE = DATA_DIR / "last_auto_run.txt"
 
 # LinkedIn tolerates roughly 100-200 invitations/week; stay well below.
 DAILY_CAP = 20
@@ -572,8 +575,45 @@ def todays_queries() -> list[tuple[str, str]]:
     return [QUERIES[(start_idx + i) % len(QUERIES)] for i in range(QUERIES_PER_RUN)]
 
 
+def ran_today() -> bool:
+    return LAST_RUN_FILE.exists() and LAST_RUN_FILE.read_text().strip() == date.today().isoformat()
+
+
+def mark_ran_today() -> None:
+    LAST_RUN_FILE.write_text(date.today().isoformat())
+
+
+def wait_for_network(timeout: int = 180) -> bool:
+    """At boot/login Wi-Fi is often not up yet."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            socket.create_connection(("www.linkedin.com", 443), timeout=5).close()
+            return True
+        except OSError:
+            time.sleep(10)
+    return False
+
+
 def cmd_auto(args) -> None:
     from notify import send_email
+
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Triggered both at login (catch-up) and at the scheduled hour: run once per weekday.
+    if not args.force:
+        if date.today().weekday() >= 5:
+            print(f"[{stamp}] week-end — rien à faire.")
+            return
+        if ran_today():
+            print(f"[{stamp}] déjà exécuté aujourd'hui — rien à faire.")
+            return
+        if not PROFILE_DIR.exists():
+            print(f"[{stamp}] jamais connecté — lance d'abord `linkedin_connect.py login`.")
+            return
+    if not wait_for_network():
+        print(f"[{stamp}] pas de réseau — nouvel essai au prochain déclenchement.")
+        return
+    print(f"[{stamp}] exécution du jour")
 
     rows = load_rows(PROSPECTS_CSV)
     report = {"added": 0, "checked": 0, "results": [], "error": None, "queries": []}
@@ -592,8 +632,12 @@ def cmd_auto(args) -> None:
                                report["results"])
             finally:
                 ctx.close()
-    except (Blocked, NotLoggedIn) as e:
+        mark_ran_today()
+    except Blocked as e:
         report["error"] = str(e)
+        mark_ran_today()  # don't insist the same day
+    except NotLoggedIn as e:
+        report["error"] = str(e)  # retried at next trigger, once logged in again
     except Exception as e:
         report["error"] = f"{type(e).__name__}: {e}"
 
@@ -694,6 +738,7 @@ def main() -> None:
     a.add_argument("--min-score", type=int, default=MIN_SCORE)
     a.add_argument("--enrich", type=int, default=20, help="profils dont on vérifie l'activité")
     a.add_argument("--note", action="store_true")
+    a.add_argument("--force", action="store_true", help="ignore week-end et « déjà exécuté aujourd'hui »")
     a.set_defaults(func=cmd_auto)
 
     args = p.parse_args()
@@ -701,7 +746,6 @@ def main() -> None:
         args.func(args)
     except NotLoggedIn as e:
         sys.exit(str(e))
-    args.func(args)
 
 
 if __name__ == "__main__":
