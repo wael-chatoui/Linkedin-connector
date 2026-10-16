@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Recherchez et sélectionnez vos prochaines connexions LinkedIn depuis votre ordinateur.">
+  <meta name="theme-color" content="#f4f6f8">
+  <meta name="robots" content="noindex, nofollow">
+  <title>LinkedIn Connector · Votre espace de recherche</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#search-form">Aller à la recherche</a>
+  <svg xmlns="http://www.w3.org/2000/svg" class="icon-definitions" aria-hidden="true">
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="icon-external" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+  </svg>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="LinkedIn Connector, accueil"><span class="brand-mark" aria-hidden="true">lc</span>LinkedIn Connector</a>
+    <span class="local-label"><span class="status-dot" aria-hidden="true"></span>Votre espace local</span>
+  </header>
+  <main class="workspace">
+    <div id="connection-error" class="notice error" role="alert" hidden></div>
+    <div id="action-error" class="notice error" role="alert" tabindex="-1" hidden></div>
+    <div id="legacy-warning" class="notice warning" hidden>Une ancienne planification automatique est présente. Elle peut envoyer des invitations indépendamment de cette page. Consultez le README pour l’arrêter.</div>
+
+    <div class="intro">
+      <div class="intro-copy"><h1>Vos prochaines connexions.</h1><p>Cherchez des profils, examinez les résultats, choisissez qui inviter.</p></div>
+      <section class="session-panel" aria-labelledby="session-heading">
+        <div class="session-info"><span class="step">1</span><div><h2 id="session-heading">Session LinkedIn</h2><p id="session-status" role="status">Vérification de l’espace local…</p></div></div>
+        <button id="login-button" type="button" class="button secondary" disabled>Se connecter <svg class="icon" aria-hidden="true"><use href="#icon-external"/></svg></button>
+        <p id="session-help" class="session-help">La connexion se fait directement dans la fenêtre LinkedIn.</p>
+      </section>
+    </div>
+
+    <dl class="metrics" aria-label="Votre activité">
+      <div><dt>Profils enregistrés</dt><dd id="stat-total">…</dd></div>
+      <div><dt>Éligibles à l’invitation</dt><dd id="stat-eligible">…</dd></div>
+      <div><dt>Invitations aujourd’hui</dt><dd><span id="stat-today">…</span><span class="metric-limit"> / <span id="daily-cap">20</span></span></dd></div>
+      <div><dt>Sur les 7 derniers jours</dt><dd><span id="stat-week">…</span><span class="metric-limit"> / <span id="weekly-cap">80</span></span></dd></div>
+    </dl>
+
+    <div class="workbench">
+      <section class="search-panel" aria-labelledby="search-heading">
+        <div class="section-heading"><span class="step">2</span><h2 id="search-heading">Définir la recherche</h2></div>
+        <form id="search-form" novalidate>
+          <label for="keywords">Mots-clés LinkedIn</label>
+          <textarea id="keywords" name="keywords" rows="3" maxlength="500" placeholder="Ex. fondateur SaaS, dirigeant PME" required aria-describedby="keywords-help"></textarea>
+          <p class="field-help" id="keywords-help">Utilisez un métier, un secteur ou une expression, comme dans la recherche LinkedIn.</p>
+          <div class="field"><label for="geography">Localisation</label><select id="geography" name="geography"><option value="france">France</option><option value="paris">Paris et sa région</option></select></div>
+          <div class="field"><label for="network">Niveau de relation</label><select id="network" name="network"><option value="S">Relations de 2e niveau</option><option value="O">Relations de 3e niveau et plus</option><option value="S,O">2e et 3e niveaux</option></select></div>
+
+          <details class="advanced">
+            <summary>Réglages avancés</summary>
+            <div class="advanced-fields">
+              <div class="field"><label for="pages">Pages à parcourir</label><input id="pages" name="pages" type="number" min="1" max="10" value="2" required><p class="field-help">De 1 à 10 pages de résultats.</p></div>
+              <div class="field"><label for="min-score">Score minimum</label><div class="input-unit"><input id="min-score" name="min_score" type="number" min="0" max="100" value="40" required><span>/ 100</span></div><p class="field-help">Le score suit les règles du projet, indépendamment des mots-clés.</p></div>
+              <div class="field"><label for="limit">Maximum par envoi</label><input id="limit" name="limit" type="number" min="1" max="20" value="3" required></div>
+              <label class="check-field"><input id="active-only" name="active_only" type="checkbox"><span>Seulement les profils actifs<p class="field-help">Dernière publication vérifiée il y a 30 jours ou moins.</p></span></label>
+              <label class="check-field"><input id="note" name="note" type="checkbox" aria-controls="note-preview"><span>Joindre la note du projet<p class="field-help">LinkedIn limite les notes selon votre compte.</p></span></label>
+              <div id="note-preview" class="note-preview" hidden><span>Modèle de la note jointe</span><p id="note-template"></p><p class="field-help">Le prénom et l’entreprise détectée remplacent les champs entre accolades. Modèle modifiable dans linkedin_connect.py.</p></div>
+            </div>
+          </details>
+          <button id="find-button" class="button primary full-width" type="submit" disabled><svg class="icon" aria-hidden="true"><use href="#icon-search"/></svg>Rechercher des profils</button>
+          <p class="save-status" id="settings-status" role="status">Les réglages restent sur cet ordinateur.</p>
+        </form>
+      </section>
+
+      <section class="results-panel" aria-labelledby="results-heading">
+        <div class="results-heading"><div class="section-heading"><span class="step">3</span><h2 id="results-heading">Examiner et sélectionner</h2></div><a id="export-link" class="text-link" href="/api/export.csv" download="prospects.csv">Exporter le CSV</a></div>
+        <div class="results-tools">
+          <label class="filter-control" for="profile-filter">Afficher <select id="profile-filter"><option value="all">Tous les profils</option><option value="eligible">Éligibles uniquement</option><option value="selected">Ma sélection</option><option value="sent">Invitations envoyées</option></select></label>
+          <span id="result-count" class="muted">Chargement…</span>
+        </div>
+        <div id="empty-state" class="empty-state" role="status"><div class="empty-symbol" aria-hidden="true"><svg class="icon"><use href="#icon-search"/></svg></div><h3 id="empty-heading">Chargement des profils</h3><p id="empty-copy">Nous ouvrons votre espace de recherche.</p></div>
+        <div id="table-wrapper" class="table-wrapper" hidden>
+          <table><caption class="sr-only">Profils LinkedIn. Cochez les personnes que vous souhaitez inviter.</caption><thead><tr><th scope="col"><span class="sr-only">Sélection</span></th><th scope="col">Profil</th><th scope="col" class="score-heading">Score</th><th scope="col">Statut</th></tr></thead><tbody id="profiles-body"></tbody></table>
+        </div>
+        <div class="selection-bar">
+          <div><strong id="selection-count" role="status">Aucun profil sélectionné</strong><p id="selection-help">Cochez les profils à inviter. Aucun envoi sans votre confirmation.</p></div>
+          <div class="selection-actions"><button id="preview-button" class="button secondary" type="button" disabled>Aperçu de la sélection</button><button id="send-button" class="button primary" type="button" disabled>Inviter la sélection <svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></button></div>
+        </div>
+        <div class="maintenance"><span>Affiner les résultats</span><button id="enrich-button" class="text-button" type="button" disabled>Vérifier l’activité</button><button id="rescore-button" class="text-button" type="button" disabled>Recalculer les scores</button></div>
+      </section>
+    </div>
+
+    <section id="activity-panel" class="activity-panel" aria-labelledby="activity-heading">
+      <div class="activity-heading"><div><h2 id="activity-heading">Journal d’activité</h2><p id="job-status" role="status">Prêt à démarrer.</p></div><button id="cancel-button" class="button secondary" type="button" hidden>Arrêter la tâche</button></div>
+      <pre id="activity-log" tabindex="0" aria-label="Détails de la dernière tâche">Les étapes de votre recherche et l’aperçu des invitations apparaîtront ici.</pre>
+    </section>
+    <footer><span>Les données et la session du navigateur sont conservées sur cet ordinateur.</span><span>Les plafonds locaux ne garantissent pas l’absence de restrictions LinkedIn.</span></footer>
+  </main>
+  <noscript><p class="notice error">Activez JavaScript pour utiliser la recherche et afficher les résultats.</p></noscript>
+</body>
+</html>

@@ -8,6 +8,7 @@ linkedin_data/
 
 # Python
 .venv/
+.runtime/
 venv/
 __pycache__/
 *.py[cod]

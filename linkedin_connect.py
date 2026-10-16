@@ -24,6 +24,8 @@ Competitors (developers, freelancers), students, recruiters are pushed down.
 
 import argparse
 import csv
+import json
+import os
 import random
 import re
 import socket
@@ -31,14 +33,15 @@ import sys
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, Error as PWError, TimeoutError as PWTimeout
+from runtime_lock import OperationBusy, OperationLock
 
 load_dotenv(Path(__file__).parent / ".env")
 
-DATA_DIR = Path(__file__).parent / "linkedin_data"
+DATA_DIR = Path(os.environ.get("LINKEDIN_DATA_DIR", Path(__file__).parent / "linkedin_data")).resolve()
 PROFILE_DIR = DATA_DIR / ".profile"
 PROSPECTS_CSV = DATA_DIR / "prospects.csv"
 LOG_FILE = DATA_DIR / "sent_log.csv"
@@ -237,10 +240,15 @@ def check_blocked(page) -> None:
 
 def start(pw):
     ctx = open_context(pw)
-    page = ctx.pages[0] if ctx.pages else ctx.new_page()
-    if not is_logged_in(page):
+    try:
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        logged_in = is_logged_in(page)
+        check_blocked(page)
+        if not logged_in:
+            raise NotLoggedIn("Session LinkedIn expirée, relance `python linkedin_connect.py login`.")
+    except BaseException:
         ctx.close()
-        raise NotLoggedIn("Session LinkedIn expirée — relance `python linkedin_connect.py login`.")
+        raise
     return ctx, page
 
 
@@ -342,10 +350,8 @@ def cmd_find(args) -> None:
         ctx, page = start(pw)
         try:
             added = find_prospects(page, rows, queries, args.pages, args.network, geo)
-        except Blocked as e:
-            print(f"⚠️  {e} — arrêt.")
-            added = None
-        ctx.close()
+        finally:
+            ctx.close()
 
     rescore(rows)
     save_rows(PROSPECTS_CSV, rows)
@@ -363,6 +369,7 @@ UNIT_DAYS = {"min": 0, "h": 0, "j": 1, "d": 1, "sem": 7, "w": 7, "mois": 30, "mo
 def last_post_days(page, url: str) -> int:
     goto(page, url + "recent-activity/all/")
     pause(3, 5)
+    check_blocked(page)
     page.mouse.wheel(0, 800)
     pause(1, 2)
     text = page.locator("main").inner_text(timeout=10000)
@@ -380,7 +387,10 @@ def enrich_rows(page, rows: list[dict], top: int, min_score: int) -> int:
     for r in todo:
         try:
             days = last_post_days(page, r["url"])
+        except Blocked:
+            raise
         except Exception as e:
+            check_blocked(page)
             print(f"  erreur {type(e).__name__} : {r['url']}")
             continue
         check_blocked(page)
@@ -399,9 +409,8 @@ def cmd_enrich(args) -> None:
         ctx, page = start(pw)
         try:
             enrich_rows(page, rows, args.top, args.min_score)
-        except Blocked as e:
-            print(f"⚠️  {e} — arrêt.")
-        ctx.close()
+        finally:
+            ctx.close()
     print()
     print_top([r for r in rows if not r["status"]])
 
@@ -438,6 +447,7 @@ def send_invite(page, row: dict, with_note: bool) -> str:
     """Returns the new status for the row."""
     goto(page, row["url"])
     pause(3, 5)
+    check_blocked(page)
     if "/in/" not in page.url:
         return "not_found"
 
@@ -522,6 +532,8 @@ def send_batch(page, rows: list[dict], todo: list[dict], budget: int, note: bool
             break
         try:
             status = send_invite(page, r, note)
+        except Blocked:
+            raise
         except Exception as e:  # keep going on UI surprises
             status = f"error_{type(e).__name__}"
         check_blocked(page)
@@ -540,9 +552,40 @@ def send_batch(page, rows: list[dict], todo: list[dict], budget: int, note: bool
             pause(5, 10)
 
 
+def selected_rows(path: Path, rows: list[dict]) -> list[dict]:
+    """Validate an explicit snapshot before opening LinkedIn or sending anything."""
+    try:
+        urls = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Impossible de lire la sélection de profils : {exc}") from exc
+    if not isinstance(urls, list) or not urls or any(not isinstance(url, str) for url in urls):
+        raise ValueError("La sélection doit être une liste JSON non vide d'URL de profils LinkedIn.")
+    if len(urls) != len(set(urls)):
+        raise ValueError("La sélection contient des profils en double.")
+    known = {}
+    for row in rows:
+        known.setdefault(row["url"], []).append(row)
+    chosen = []
+    for url in urls:
+        parsed = urlsplit(url)
+        if (parsed.scheme != "https" or parsed.netloc != "www.linkedin.com"
+                or not re.fullmatch(r"/in/[^/?#]+/", parsed.path)
+                or parsed.query or parsed.fragment):
+            raise ValueError(f"URL de profil LinkedIn invalide : {url}")
+        matches = known.get(url, [])
+        if not matches:
+            raise ValueError(f"Profil sélectionné inconnu : {url}")
+        if len(matches) != 1:
+            raise ValueError(f"Profil présent plusieurs fois dans les données : {url}")
+        chosen.append(matches[0])
+    return chosen
+
+
 def cmd_run(args) -> None:
     rows = load_rows(PROSPECTS_CSV)
-    todo = eligible(rows, args.min_score, args.active_only)
+    selection = getattr(args, "selected_file", None)
+    candidates = selected_rows(selection, rows) if selection is not None else rows
+    todo = eligible(candidates, args.min_score, args.active_only)
     budget = remaining_budget(args.limit)
     print(f"{len(todo)} prospects éligibles (score ≥ {args.min_score}) · budget restant : {budget}")
     if budget <= 0:
@@ -552,15 +595,17 @@ def cmd_run(args) -> None:
     if args.dry_run:
         print_top(todo, budget)
         return
+    if not todo:
+        print("Aucun profil éligible dans la sélection.")
+        return
 
     results: list[dict] = []
     with sync_playwright() as pw:
         ctx, page = start(pw)
         try:
             send_batch(page, rows, todo, budget, args.note, results)
-        except Blocked as e:
-            print(f"⚠️  {e} — arrêt.")
-        ctx.close()
+        finally:
+            ctx.close()
     print(f"Terminé : {sum(r['status'] == 'sent' for r in results)} invitation(s) envoyée(s).")
 
 
@@ -617,6 +662,7 @@ def cmd_auto(args) -> None:
 
     rows = load_rows(PROSPECTS_CSV)
     report = {"added": 0, "checked": 0, "results": [], "error": None, "queries": []}
+    failure = None
     budget = remaining_budget(args.limit)
 
     try:
@@ -634,11 +680,14 @@ def cmd_auto(args) -> None:
                 ctx.close()
         mark_ran_today()
     except Blocked as e:
+        failure = e
         report["error"] = str(e)
         mark_ran_today()  # don't insist the same day
     except NotLoggedIn as e:
+        failure = e
         report["error"] = str(e)  # retried at next trigger, once logged in again
     except Exception as e:
+        failure = e
         report["error"] = f"{type(e).__name__}: {e}"
 
     sent = [r for r in report["results"] if r["status"] == "sent"]
@@ -647,6 +696,8 @@ def cmd_auto(args) -> None:
     html = render_report(report, rows, budget, args.min_score)
     print(subject)
     send_email(subject, html)
+    if failure is not None:
+        raise failure
 
 
 def render_report(report: dict, rows: list[dict], budget: int, min_score: int) -> str:
@@ -685,15 +736,31 @@ def render_report(report: dict, rows: list[dict], budget: int, min_score: int) -
 
 # ── login / cli ───────────────────────────────────────────────────────────────
 
-def cmd_login(_args) -> None:
+def cmd_login(args) -> None:
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as pw:
         ctx = open_context(pw)
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        page.goto("https://www.linkedin.com/login")
-        input("Connecte-toi dans la fenêtre, puis appuie sur Entrée ici… ")
-        print("Session OK" if is_logged_in(page) else "Pas connecté — relance `login`.")
-        ctx.close()
+        try:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            page.goto("https://www.linkedin.com/login")
+            if getattr(args, "wait", False):
+                print("Connecte-toi dans la fenêtre LinkedIn. Détection automatique de la session…")
+                deadline = time.monotonic() + args.timeout
+                while time.monotonic() < deadline:
+                    if page.is_closed():
+                        raise NotLoggedIn("La fenêtre LinkedIn a été fermée avant la connexion.")
+                    parsed = urlsplit(page.url)
+                    if parsed.hostname == "www.linkedin.com" and parsed.path.rstrip("/") == "/feed":
+                        print("Session OK")
+                        return
+                    page.wait_for_timeout(500)
+                raise NotLoggedIn("Délai de connexion dépassé. Relance la connexion pour réessayer.")
+            input("Connecte-toi dans la fenêtre, puis appuie sur Entrée ici… ")
+            if not is_logged_in(page):
+                raise NotLoggedIn("Pas connecté, relance `login`.")
+            print("Session OK")
+        finally:
+            ctx.close()
 
 
 def cmd_rescore(_args) -> None:
@@ -707,7 +774,10 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("login").set_defaults(func=cmd_login)
+    login = sub.add_parser("login")
+    login.add_argument("--wait", action="store_true", help="détecte la connexion sans entrée au terminal")
+    login.add_argument("--timeout", type=int, default=300, help="délai maximal de connexion en secondes")
+    login.set_defaults(func=cmd_login)
 
     f = sub.add_parser("find", help="recherche de personnes → prospects.csv")
     f.add_argument("--segments", help=f"parmi : {', '.join(sorted({q[0] for q in QUERIES}))}")
@@ -731,6 +801,7 @@ def main() -> None:
     r.add_argument("--active-only", action="store_true", help="seulement les profils actifs < 30 j")
     r.add_argument("--note", action="store_true", help="ajouter une note personnalisée")
     r.add_argument("--dry-run", action="store_true")
+    r.add_argument("--selected-file", type=Path, help="liste JSON des seules URL de profils autorisées")
     r.set_defaults(func=cmd_run)
 
     a = sub.add_parser("auto", help="pipeline quotidien (find si besoin → enrich → run) + e-mail")
@@ -742,10 +813,16 @@ def main() -> None:
     a.set_defaults(func=cmd_auto)
 
     args = p.parse_args()
+    if args.cmd == "login" and args.timeout <= 0:
+        p.error("--timeout doit être strictement positif")
     try:
-        args.func(args)
-    except NotLoggedIn as e:
-        sys.exit(str(e))
+        with OperationLock(DATA_DIR / ".operation.lock"):
+            args.func(args)
+    except (NotLoggedIn, Blocked, OperationBusy, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        exit_codes = {NotLoggedIn: 3, Blocked: 4, OperationBusy: 5, ValueError: 2}
+        code = next(code for exception, code in exit_codes.items() if isinstance(exc, exception))
+        sys.exit(code)
 
 
 if __name__ == "__main__":
