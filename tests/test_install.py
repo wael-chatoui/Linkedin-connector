@@ -73,6 +73,11 @@ class InstallerTests(unittest.TestCase):
         self.python = self.bin / "python3"
         self.python.write_text(f"#!{sys.executable}\n" + FAKE_PYTHON, encoding="utf-8")
         self.python.chmod(0o755)
+        # Shadow every installer candidate, including Python versions already
+        # installed under /usr/bin on Linux CI runners. The missing-Python
+        # scenario must never fall through to a real host interpreter.
+        for version in ("3.14", "3.13", "3.12", "3.11", "3.10"):
+            (self.bin / f"python{version}").symlink_to(self.python.name)
         for executable in ("curl", "wget", "launchctl"):
             script = self.bin / executable
             script.write_text('#!/bin/sh\necho "Forbidden external action" >&2\nexit 98\n')
