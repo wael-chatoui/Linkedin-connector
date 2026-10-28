@@ -1,5 +1,14 @@
 # Notes de version
 
+## 1.1.0, 28 octobre 2026
+
+- Rapports e-mail centralisés via le domaine FluentFlow, avec une clé Resend conservée uniquement côté serveur.
+- Adresse personnelle configurable dans l’interface, confirmation par lien reçu et désactivation indépendante des invitations.
+- Bilan limité aux compteurs et au résultat du passage, sans transmission des profils ni de la session LinkedIn.
+- Affichage du dernier résultat d’envoi et des erreurs de configuration ou de connexion au service.
+- Bilan des passages sans invitation, notamment lorsqu’un quota est atteint ou qu’une reconnexion est nécessaire ; pas de doublon lors d’un passage déjà traité.
+- Conservation des anciennes configurations `.env` jusqu’à l’activation ou la désactivation explicite du nouveau service sur ce Mac.
+
 ## 1.0.0, 28 octobre 2026
 
 Première version identifiée pour le partage sur Mac.

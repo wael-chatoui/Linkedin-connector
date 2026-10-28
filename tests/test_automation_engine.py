@@ -430,6 +430,73 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual([row["name"] for row in saved], ["old", "current"])
         self.assertEqual([row["last_post_days"] for row in saved], ["", "3"])
 
+    def test_every_eligible_attempt_has_one_anonymous_final_mail_summary(self):
+        self.configure()
+        self.pipeline(set())
+        with patch("notify.send_report", return_value=True) as mail:
+            self.invoke()
+            mail.assert_called_once()
+            payload = mail.call_args.args[1]
+            self.assertEqual(payload["status"], "success")
+            self.assertEqual(payload["reason"], "no_matches")
+            self.assertEqual(payload["sent"], 0)
+            self.assertEqual(set(payload), {"report_id", "date", "status", "reason", "sent", "added", "checked", "matched", "eligible"})
+            self.assertNotIn("Founder SaaS", json.dumps(payload))
+            mail.reset_mock()
+            self.network.return_value = False
+            self.invoke()
+            mail.assert_called_once()
+            self.assertEqual(mail.call_args.args[1]["reason"], "network")
+            mail.reset_mock()
+            with patch.object(engine, "remaining_budget", return_value=0):
+                self.invoke()
+            mail.assert_called_once()
+            self.assertEqual(mail.call_args.args[1]["reason"], "quota")
+            mail.reset_mock()
+            engine.PROFILE_DIR.rmdir()
+            self.invoke()
+            mail.assert_called_once()
+            self.assertEqual(mail.call_args.args[1]["reason"], "login")
+
+    def test_finished_failures_report_once_and_mail_failure_does_not_change_pipeline_result(self):
+        self.configure()
+        self.start.side_effect = engine.Blocked("private LinkedIn checkpoint URL")
+        with patch("notify.send_report", side_effect=RuntimeError("private mail token")) as mail:
+            with self.assertRaises(engine.Blocked):
+                self.invoke()
+        mail.assert_called_once()
+        payload = mail.call_args.args[1]
+        self.assertEqual((payload["status"], payload["reason"]), ("error", "linkedin_check"))
+        self.assertNotIn("private", json.dumps(payload))
+        self.assertEqual(self.status()["reason"], "linkedin_check")
+
+    def test_duplicate_and_disabled_attempts_do_not_email_again(self):
+        self.configure()
+        engine.mark_ran_today()
+        with patch("notify.send_report") as mail:
+            self.invoke(force=False)
+            mail.assert_not_called()
+            self.configure(automation_enabled=False)
+            self.invoke()
+            mail.assert_not_called()
+
+    def test_broken_sent_history_still_sends_the_central_error_summary(self):
+        from mail_client import MailClient
+        self.configure()
+        with patch("mail_client.MailClient._request", return_value={"status": "pending"}):
+            MailClient(self.directory).configure({"enabled": True, "email": "ami@example.fr"})
+        with patch.object(engine, "sent_since", side_effect=ValueError("private broken CSV")), \
+                patch.object(engine, "render_report", side_effect=ValueError("private HTML failure")) as renderer, \
+                patch("notify.MailClient.deliver", return_value=True) as central:
+            with self.assertRaisesRegex(ValueError, "private broken CSV"):
+                self.invoke()
+        renderer.assert_not_called()
+        central.assert_called_once()
+        payload = central.call_args.args[0]
+        self.assertEqual((payload["status"], payload["reason"], payload["sent"]), ("error", "error", 0))
+        self.assertNotIn("private", json.dumps(payload))
+        self.email.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,9 @@
   let tableSignature = "";
   let jobSignature = "";
   let searchSignature = "";
+  let mailSubmitting = false;
+  let mailDirty = false;
+  let mailInitialized = false;
 
   const settings = () => ({
     keywords: $("keywords").value.trim(), pages: Number($("pages").value),
@@ -88,7 +91,11 @@
         if (error.name === "AbortError") throw error;
         throw new Error("L’application n’a pas répondu correctement. Rechargez la page puis réessayez.");
       }
-      if (!response.ok || payload.error) throw new Error(payload.error || "L’action n’a pas pu démarrer. Réessayez.");
+      if (!response.ok || payload.error) {
+        const error = new Error(payload.error || "L’action n’a pas pu démarrer. Réessayez.");
+        if (payload.mail) error.mail = payload.mail;
+        throw error;
+      }
       return payload;
     } catch (error) {
       if (error.name === "AbortError") throw new Error("La réponse prend trop de temps. Vérifiez l’état affiché avant de réessayer.");
@@ -233,6 +240,62 @@
     return "Pas encore envoyée";
   }
 
+  function renderMail() {
+    const mail = state?.mail;
+    const status = mail?.status || "unconfigured";
+    const input = $("mail-email");
+    if (mail && (!mailInitialized || (!mailDirty && !mailSubmitting))) {
+      input.value = mail.email || "";
+      mailInitialized = true;
+    }
+    const changed = input.value.trim() !== (mail?.email || "");
+    const unavailable = !online || !mail || mailSubmitting;
+    input.disabled = unavailable;
+    $("mail-submit-button").disabled = unavailable || (status === "verified" && !changed);
+    $("mail-disable-button").hidden = !mail?.enabled;
+    $("mail-disable-button").disabled = unavailable;
+    setText("mail-submit-button", mailSubmitting ? "Enregistrement…" : status === "verified" ? changed ? "Confirmer cette nouvelle adresse" : "Adresse confirmée" : status === "pending" && !changed ? "Renvoyer le lien de confirmation" : "Recevoir le lien de confirmation");
+    const message = !online ? "Rouvrez l’application pour consulter ou modifier les bilans par e-mail." : !mail ? "Les réglages e-mail sont indisponibles. Rouvrez l’application pour les charger." : status === "verified" ? `Bilans activés pour ${mail.email}.` : status === "pending" ? `Confirmation en attente pour ${mail.email}.` : mail.message || (status === "disabled" ? "Les bilans par e-mail sont désactivés." : "Les bilans par e-mail ne sont pas activés.");
+    setText("mail-status", message);
+    $("mail-status").classList.toggle("verified", online && status === "verified");
+    $("mail-status").classList.toggle("error", online && status === "error");
+    $("mail-confirmation-help").hidden = !online || status !== "pending";
+    const delivery = mail?.last_delivery;
+    $("mail-last-delivery").hidden = !delivery;
+    $("mail-last-delivery").classList.toggle("error", delivery?.status === "error");
+    if (delivery) {
+      const labels = { sent: "Dernier bilan envoyé", duplicate: "Dernier bilan déjà envoyé", pending: "Dernier bilan en attente de confirmation", disabled: "Dernier bilan non envoyé", error: "Le dernier bilan n’a pas pu être envoyé" };
+      setText("mail-last-delivery", `${labels[delivery.status] || "Dernier bilan"}${delivery.attempted_at ? ` · ${formatDate(delivery.attempted_at)}` : ""}.${delivery.message ? ` ${delivery.message}` : ""}`);
+    }
+  }
+
+  async function configureMail(enabled) {
+    if (!online || !state?.mail || mailSubmitting) return;
+    const input = $("mail-email");
+    if (enabled && !input.checkValidity()) {
+      input.setAttribute("aria-invalid", "true");
+      setText("mail-email-error", "Saisissez votre adresse e-mail complète, par exemple vous@exemple.fr.");
+      $("mail-email-error").hidden = false;
+      input.focus();
+      return;
+    }
+    $("mail-error").hidden = true;
+    mailSubmitting = true; renderMail();
+    try {
+      const payload = await post("/api/mail", enabled ? { enabled: true, email: input.value.trim() } : { enabled: false });
+      if (payload.mail) state.mail = payload.mail;
+      mailDirty = false;
+      input.setAttribute("aria-invalid", "false");
+      $("mail-email-error").hidden = true;
+      await refresh(true);
+    } catch (error) {
+      if (error.mail) state.mail = error.mail;
+      setText("mail-error", error.message);
+      $("mail-error").hidden = false;
+      $("mail-error").focus();
+    } finally { mailSubmitting = false; renderMail(); }
+  }
+
   function element(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -325,7 +388,7 @@
     setText("stat-today", format(stats.sent_today)); setText("stat-week", format(stats.sent_week));
     setText("daily-cap", format(stats.daily_cap ?? 20)); setText("weekly-cap", format(stats.weekly_cap ?? 80));
     setText("app-version", state?.version ? `Version ${state.version}` : "");
-    renderSession(); renderAutomation(); renderRows(); renderControls(); renderJob();
+    renderSession(); renderAutomation(); renderRows(); renderControls(); renderJob(); renderMail();
   }
 
   async function refresh(force = false) {
@@ -358,7 +421,7 @@
       online = false;
       setText("connection-error", "Cette page ne peut plus joindre l’application. Ouvrez Démarrer.command dans le dossier de l’application. Cette page se reconnectera automatiquement. Cela ne met pas vos invitations programmées en pause.");
       $("connection-error").hidden = false;
-      renderSession(); renderAutomation(); renderRows(true); renderControls();
+      renderSession(); renderAutomation(); renderRows(true); renderControls(); renderMail();
     } finally { clearTimeout(timeout); }
   }
 
@@ -426,6 +489,15 @@
     render(); $("keywords").focus();
   });
   $("profile-filter").addEventListener("change", () => renderRows());
+  $("mail-form").addEventListener("submit", (event) => { event.preventDefault(); configureMail(true); });
+  $("mail-disable-button").addEventListener("click", () => configureMail(false));
+  $("mail-email").addEventListener("input", () => {
+    mailDirty = true;
+    $("mail-email").setAttribute("aria-invalid", "false");
+    $("mail-email-error").hidden = true;
+    $("mail-error").hidden = true;
+    renderMail();
+  });
   for (const [id, action] of [["login-button", "login"], ["find-button", "find"], ["enrich-button", "enrich"], ["rescore-button", "rescore"]]) $(id).addEventListener("click", () => startJob(action));
   $("cancel-button").addEventListener("click", async () => {
     if (submitting || !isJobRunning()) return;
@@ -436,6 +508,6 @@
   });
   window.addEventListener("online", () => refresh());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
-  window.addEventListener("beforeunload", (event) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
+  window.addEventListener("beforeunload", (event) => { if (dirty || mailDirty) { event.preventDefault(); event.returnValue = ""; } });
   refresh();
 })();

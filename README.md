@@ -6,7 +6,7 @@ Choisissez les personnes à rechercher sur LinkedIn et l’heure d’envoi. L’
 
 ## Première ouverture sur Mac
 
-1. [Téléchargez la version 1.0.0 pour Mac](https://github.com/wael-chatoui/Linkedin-connector/archive/refs/tags/v1.0.0.zip). Vous pouvez aussi [ouvrir le projet sur GitHub](https://github.com/wael-chatoui/Linkedin-connector), puis choisir **Code > Download ZIP** pour obtenir la version en cours de développement.
+1. [Téléchargez la version 1.1.0 pour Mac](https://github.com/wael-chatoui/Linkedin-connector/archive/refs/tags/v1.1.0.zip). Vous pouvez aussi [ouvrir le projet sur GitHub](https://github.com/wael-chatoui/Linkedin-connector), puis choisir **Code > Download ZIP** pour obtenir la version en cours de développement.
 2. Dans Téléchargements, ouvrez le fichier ZIP. Déplacez le dossier obtenu dans **Documents**, ou un autre endroit où vous souhaitez le garder. Ne le déplacez plus après avoir activé l’automatisation.
 3. Dans ce dossier, double-cliquez sur **Démarrer.command**. Une fenêtre nommée Terminal s’ouvre : c’est normal. Vous n’avez rien à y taper.
 4. Attendez la fin des quatre étapes. Au premier démarrage, les outils nécessaires sont téléchargés ; cela peut prendre plusieurs minutes. Une page s’ouvre ensuite dans votre navigateur.
@@ -36,6 +36,19 @@ Vous pouvez d’abord **Tester la recherche sans envoyer** pour voir les résult
 L’application applique aussi un plafond de **80 invitations sur les 7 derniers jours**. Avec un maximum de 15 par jour, certains jours peuvent donc compter moins d’envois. Le test de recherche affiche ses propres résultats ; choisissez **Tous les profils enregistrés** pour retrouver l’historique complet.
 
 La version installée est indiquée tout en bas de la page. Consultez les [notes de version](CHANGELOG.md) pour voir les changements.
+
+## Recevoir votre bilan par e-mail
+
+Cette option est indépendante des invitations. Chaque utilisateur choisit son propre destinataire depuis l’application : aucun compte Resend ni clé API n’est nécessaire sur son Mac.
+
+1. Dans **Recevoir les bilans par e-mail**, renseignez **Votre adresse e-mail**.
+2. Cliquez sur **Recevoir le lien de confirmation**.
+3. Ouvrez le message de **LinkedIn Connector**, envoyé depuis `rapports@fluent-flow.fr`, puis le lien de confirmation. Consultez les courriers indésirables si nécessaire.
+4. Cliquez sur **Confirmer mon adresse** dans la page ouverte, puis revenez au connecteur. Le statut se met à jour automatiquement.
+
+Les prochains passages programmés auront un bilan, y compris lorsqu’aucune invitation ne peut être envoyée à cause du quota ou d’une connexion LinkedIn à renouveler. Le résumé contient les compteurs et le motif du résultat. Les noms, URL et données des profils LinkedIn restent sur votre ordinateur.
+
+Pour arrêter les rapports, cliquez sur **Désactiver les bilans par e-mail**. Cette action ne met pas les invitations en pause. Un passage non lancé parce que le Mac est éteint ne peut pas produire de rapport ; une absence de réseau peut aussi empêcher sa transmission.
 
 ## Au quotidien
 
@@ -137,14 +150,24 @@ Les fichiers personnels sont ignorés par Git :
 | `linkedin_data/automation_status.json` | Dernière exécution, réglages utilisés, résultats et erreurs |
 | `linkedin_data/last_auto_run.txt` | Jour déjà traité, pour éviter de répéter les envois |
 | `linkedin_data/last_search.json` | Résultats et critères du dernier test de recherche, distincts de l’historique |
+| `linkedin_data/mail_config.json` | Adresse, état et jeton privé de cette installation pour les rapports |
+| `linkedin_data/mail_delivery.json` | Résultat du dernier envoi de bilan |
 | `.env` | Configuration optionnelle des e-mails |
 | `.venv/`, `.runtime/` | Environnement Python et outils d'installation |
 
 Protégez le dossier `.profile/` comme une session de compte. Pour changer d'ordinateur, copiez les CSV afin de conserver les prospects et l'historique, puis connectez-vous à nouveau à LinkedIn. Ne supprimez pas l'historique pour contourner les plafonds.
 
-## Rapports e-mail facultatifs
+## Configuration du service e-mail (maintenance)
 
-L'application fonctionne sans `.env` et sans compte Resend. Pour les rapports du mode `auto`, créez `.env` à partir de `.env.example` et renseignez :
+Les utilisateurs du connecteur passent par le service central `https://fluent-flow.fr/api/linkedin-reports`. Ce service vérifie leur adresse et utilise un modèle de rapport fixe. Les jetons privés sont propres à chaque installation et révocables. Une copie installée ne contient aucune clé Resend commune.
+
+La clé **`RESEND_API_KEY` doit être installée uniquement dans les variables privées du serveur FluentFlow**, sur Vercel, avant d’activer ce service en production. L’expéditeur par défaut est `LinkedIn Connector <rapports@fluent-flow.fr>` ; `LINKEDIN_REPORTS_FROM` permet à l’exploitant de le modifier. Le domaine d’envoi doit être vérifié dans Resend. Les quotas du [forfait Resend](https://resend.com/docs/knowledge-base/account-quotas-and-limits) restent applicables.
+
+Le serveur utilise des tables de rapports isolées des comptes et cours PhraseLane. Une adresse confirmée reçoit au plus une nouvelle réservation de rapport par jour UTC ; les nouvelles tentatives du même rapport utilisent la clé d’idempotence du prestataire. L’adresse et les compteurs nécessaires au bilan sont transmis au service central, pas les cookies ni les profils LinkedIn.
+
+### Compatibilité avec les anciennes installations
+
+Si aucun `mail_config.json` n’existe encore, une ancienne configuration `.env` continue d’être reconnue. Dès que les rapports centraux sont configurés ou explicitement désactivés, elle ne sert plus de solution de repli. Les anciennes variables sont :
 
 | Variable | Valeur |
 |---|---|
@@ -152,7 +175,7 @@ L'application fonctionne sans `.env` et sans compte Resend. Pour les rapports du
 | `NOTIFY_EMAIL` | Adresse de destination du rapport |
 | `RESEND_FROM` | Expéditeur facultatif sur un domaine vérifié dans Resend |
 
-Le lanceur ne crée ni ne modifie `.env`. Consultez [Resend](https://resend.com) pour configurer l'envoi et les restrictions de votre compte.
+Le lanceur ne crée ni ne modifie `.env`. Ce fichier reste privé et n’est pas distribué aux amis avec le programme.
 
 ## Fonctionnement de la planification macOS
 

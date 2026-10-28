@@ -96,6 +96,20 @@
       </aside>
     </div>
 
+    <section class="mail-panel" aria-labelledby="mail-heading">
+      <div class="mail-heading"><h2 id="mail-heading">Recevoir les bilans par e-mail</h2><span class="muted">Facultatif</span></div>
+      <p class="field-help">Recevez le résultat de chaque passage automatique à votre adresse, depuis <span translate="no">rapports@fluent-flow.fr</span>. Cette option ne change pas vos invitations.</p>
+      <p id="mail-status" class="mail-status" role="status">Vérification des bilans par e-mail…</p>
+      <p id="mail-confirmation-help" class="field-help" hidden>Ouvrez le message reçu de rapports@fluent-flow.fr, puis cliquez sur son lien de confirmation. Vérifiez aussi les courriers indésirables. Revenez ensuite sur cette page : la confirmation sera détectée automatiquement.</p>
+      <form id="mail-form" novalidate>
+        <div class="field"><label for="mail-email">Votre adresse e-mail</label><input id="mail-email" name="email" type="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" maxlength="254" required aria-describedby="mail-help mail-email-error" disabled><p id="mail-help" class="field-help">Un lien sera envoyé à cette adresse pour vérifier qu’elle vous appartient.</p><p id="mail-email-error" class="field-error" hidden></p></div>
+        <div class="mail-actions"><button id="mail-submit-button" class="button secondary" type="submit" disabled>Recevoir le lien de confirmation</button><button id="mail-disable-button" class="text-button" type="button" hidden>Désactiver les bilans par e-mail</button></div>
+      </form>
+      <div id="mail-error" class="notice error" role="alert" tabindex="-1" hidden></div>
+      <p id="mail-last-delivery" class="mail-last-delivery" role="status" hidden></p>
+      <p class="field-help mail-privacy">Votre adresse et un résumé chiffré du passage transitent par le service d’envoi FluentFlow. Votre connexion LinkedIn et les profils enregistrés restent sur ce Mac.</p>
+    </section>
+
     <section class="results-panel" aria-labelledby="results-heading">
       <div class="results-heading"><div><h2 id="results-heading">Profils trouvés et invitations</h2><p id="results-description" class="field-help">L’historique inclut vos anciennes recherches. Il ne prédit pas qui sera invité au prochain passage.</p></div><span id="result-count" class="muted" role="status">Chargement…</span></div>
       <div class="results-tools"><label class="filter-control" for="profile-filter">Afficher <select id="profile-filter"><option id="latest-search-option" value="latest" hidden>Résultats du dernier test</option><option value="all" selected>Tous les profils enregistrés</option><option value="eligible">Profils passant les filtres avancés</option><option value="sent">Invitations envoyées</option></select></label></div>
@@ -108,7 +122,7 @@
     </section>
 
     <section id="activity-panel" class="activity-panel" aria-labelledby="activity-heading"><div class="activity-heading"><div><h2 id="activity-heading">Dernière action</h2><p id="job-status" role="status">Aucune action pour le moment.</p></div><button id="cancel-button" class="button secondary" type="button" hidden>Arrêter cette action</button></div><details class="technical-details"><summary>Voir les détails techniques</summary><pre id="activity-log" tabindex="0" aria-label="Détails de la dernière action">Les détails des recherches et des invitations apparaîtront ici.</pre></details></section>
-    <footer><p>Vos réglages, votre connexion LinkedIn et votre historique restent sur cet ordinateur.</p><p id="app-version" class="version-label"></p></footer>
+    <footer><p>Votre connexion LinkedIn et votre historique restent sur cet ordinateur. Les bilans par e-mail sont facultatifs.</p><p id="app-version" class="version-label"></p></footer>
   </main>
   <noscript><p class="notice error">Activez JavaScript dans votre navigateur pour utiliser cette page.</p></noscript>
 </body>

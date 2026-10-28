@@ -32,6 +32,7 @@ import socket
 import sys
 import tempfile
 import time
+import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -736,16 +737,36 @@ def auto_failure_details(error: Exception) -> tuple[str, str]:
 
 
 def cmd_auto(args) -> None:
-    from notify import send_email
+    from notify import send_report
 
     started_at = datetime.now().astimezone().isoformat(timespec="seconds")
     settings = None
     report = {"added": 0, "checked": 0, "matched": None, "eligible": None,
               "results": [], "error": None, "queries": []}
+    report_id = "auto-" + uuid.uuid4().hex
+    mailed = False
+    candidates, budget = [], 0
 
-    def finish(status, message, *, reason=None, summary=None):
+    def finish(status, message, *, reason=None, summary=None, notify_mail=True, legacy=False):
+        nonlocal mailed
         print(f"[{started_at}] {message}")
         write_auto_status(status, message, started_at, settings, report, reason=reason, summary=summary)
+        if status == "running" or not notify_mail or mailed:
+            return
+        mailed = True
+        sent = sum(row["status"] == "sent" for row in report["results"])
+        public_report = {"report_id": report_id, "date": date.today().isoformat(),
+                         "status": status, "reason": reason, "sent": sent,
+                         **{key: report[key] for key in ("added", "checked", "matched", "eligible")}}
+        try:
+            subject = html = None
+            if legacy:
+                subject = (f"⚠️ LinkedIn auto : {report['error'][:60]}" if report["error"] and not sent
+                           else f"LinkedIn : {sent} invitation(s) envoyée(s)")
+                html = lambda: render_report(report, candidates, budget, settings["min_score"])
+            send_report(DATA_DIR, public_report, legacy_subject=subject, legacy_html=html)
+        except Exception:
+            print("Le bilan par e-mail n’a pas pu être envoyé. Les invitations ne sont pas affectées.")
 
     try:
         # Never reuse the web server's memory or fall back to predefined searches.
@@ -760,21 +781,21 @@ def cmd_auto(args) -> None:
         raise
     if not settings["automation_enabled"]:
         finish("skipped", "L'automatisation est en pause.",
-               summary="L’automatisation est en pause. Aucun envoi automatique n’est prévu.")
-        return
-    if not settings["keywords"]:
-        finish("skipped", "Aucun mot-clé configuré. Aucune invitation envoyée.", reason="configuration",
-               summary="Ajoutez au moins une recherche dans l’application pour choisir qui inviter.")
+               summary="L’automatisation est en pause. Aucun envoi automatique n’est prévu.", notify_mail=False)
         return
     if not getattr(args, "force", False):
         if settings["schedule_days"] == "weekdays" and date.today().weekday() >= 5:
             finish("skipped", "Week-end : le programme est limité aux jours ouvrés.",
-                   summary="Aucun envoi prévu le week-end avec les jours choisis.")
+                   summary="Aucun envoi prévu le week-end avec les jours choisis.", notify_mail=False)
             return
         if ran_today():
             finish("skipped", "L'automatisation a déjà été exécutée aujourd'hui.",
-                   summary="Le passage d’aujourd’hui a déjà eu lieu. Aucun nouvel envoi ne sera lancé aujourd’hui.")
+                   summary="Le passage d’aujourd’hui a déjà eu lieu. Aucun nouvel envoi ne sera lancé aujourd’hui.", notify_mail=False)
             return
+    if not settings["keywords"]:
+        finish("skipped", "Aucun mot-clé configuré. Aucune invitation envoyée.", reason="configuration",
+               summary="Ajoutez au moins une recherche dans l’application pour choisir qui inviter.")
+        return
     if not PROFILE_DIR.exists():
         finish("skipped", "Connecte d'abord ton compte LinkedIn dans l'interface.", reason="login",
                summary="Connectez votre compte LinkedIn depuis l’application avant le prochain passage.")
@@ -867,10 +888,7 @@ def cmd_auto(args) -> None:
         reason = "no_eligible"
         summary = "Aucune nouvelle invitation envoyée : les profils retenus n’ont pas pu être invités sur LinkedIn. Consultez leurs statuts."
     finish("error" if failure else "success", report["error"] or f"{sent} invitation(s) envoyée(s).",
-           reason=reason, summary=summary)
-    subject = (f"⚠️ LinkedIn auto : {report['error'][:60]}" if report["error"] and not sent
-               else f"LinkedIn : {sent} invitation(s) envoyée(s)")
-    send_email(subject, render_report(report, candidates, budget, settings["min_score"]))
+           reason=reason, summary=summary, legacy=True)
     if failure is not None:
         raise failure
 

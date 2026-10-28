@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import linkedin_connect as engine
 from app_settings import DEFAULTS, SettingsError as InputError, read_settings, validate_settings, write_settings
 from automation_schedule import ScheduleError, ScheduleManager
+from mail_client import MailClient, MailError
 from runtime_lock import OperationBusy, OperationLock, operation_in_progress
 
 ROOT = Path(__file__).resolve().parent
@@ -101,7 +102,7 @@ def next_scheduled_run(settings, now=None, already_ran=None):
 
 
 class Application:
-    def __init__(self, data_dir=None, scheduler=None):
+    def __init__(self, data_dir=None, scheduler=None, mail_client=None):
         self.data_dir = Path(data_dir or engine.DATA_DIR).resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.settings_path = self.data_dir / "settings.json"
@@ -122,6 +123,7 @@ class Application:
         self.worker = None
         self.stopping = False
         self.scheduler = scheduler if scheduler is not None else ScheduleManager(ROOT, data_dir=self.data_dir)
+        self.mail = mail_client if mail_client is not None else MailClient(self.data_dir)
         self.schedule_cache = None
         self.schedule_checked_at = 0
         self.configuration_error = None
@@ -368,8 +370,14 @@ class Application:
                             "profile_exists": (self.data_dir / ".profile").exists()},
                 "job": json.loads(json.dumps(self.job)) if self.job else None,
                 "automation": automation,
+                "mail": self.mail.state(),
                 "legacy_schedule": automation["scheduler"]["installed"] and not automation["enabled"],
             }
+
+    def configure_mail(self, payload):
+        # Mail settings have their own credential lock and remain available
+        # while an automation owns the LinkedIn browser/profile lock.
+        return {"ok": True, "mail": self.mail.configure(payload)}
 
     def start_job(self, payload):
         if not isinstance(payload, dict) or payload.keys() - {"action", "settings", "selected_urls", "confirmed"}:
@@ -630,6 +638,8 @@ class Handler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             if path == "/api/settings":
                 self.reply(200, {"ok": True, "settings": self.server.app.save_settings(payload)})
+            elif path == "/api/mail":
+                self.reply(200, self.server.app.configure_mail(payload))
             elif path == "/api/automation":
                 self.reply(200, self.server.app.configure_automation(payload))
             elif path == "/api/jobs":
@@ -640,6 +650,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, {"ok": True})
             else:
                 self.reply(404, {"error": "Action introuvable."})
+        except MailError as error:
+            self.reply(error.status, {"error": str(error), "mail": self.server.app.mail.state(refresh=False)})
         except BusyError as error:
             self.reply(409, {"error": str(error)})
         except ScheduleError as error:

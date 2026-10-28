@@ -449,6 +449,46 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/api/automation", {"enabled": False}, headers)[0], 200)
         self.assertFalse(self.app.settings["automation_enabled"])
 
+    def test_mail_endpoint_requires_csrf_and_keeps_credentials_out_of_state(self):
+        payload = {"enabled": True, "email": "ami@example.fr"}
+        with patch.object(self.app.mail, "_request", return_value={"status": "pending"}) as relay:
+            self.assertEqual(self.request("POST", "/api/mail", payload,
+                                          {"Content-Type": "application/json"})[0], 403)
+            relay.assert_not_called()
+            headers = {"Content-Type": "application/json", "X-CSRF-Token": self.app.csrf_token}
+            with OperationLock(self.app.data_dir / ".operation.lock"):
+                status, body, _ = self.request("POST", "/api/mail", payload, headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body)["mail"]["status"], "pending")
+            config = json.loads(self.app.mail.config_path.read_text())
+            self.assertNotIn(config["token"], body.decode())
+            status, state, _ = self.request("GET", "/api/state")
+            self.assertEqual(status, 200)
+            self.assertNotIn(config["token"], state.decode())
+            self.assertEqual(json.loads(state)["mail"]["email"], payload["email"])
+            self.app.mail.last_poll -= 6
+            relay.return_value = {"status": "verified", "email": payload["email"]}
+            self.assertEqual(json.loads(self.request("GET", "/api/state")[1])["mail"]["status"], "verified")
+            relay.return_value = {"ok": True}
+            status, body, _ = self.request("POST", "/api/mail", {"enabled": False}, headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body)["mail"]["status"], "disabled")
+            self.assertFalse(self.app.settings["automation_enabled"])
+
+    def test_mail_validation_and_remote_errors_are_visible_without_starting_linkedin(self):
+        headers = {"Content-Type": "application/json", "X-CSRF-Token": self.app.csrf_token}
+        for payload in ({"enabled": "yes"}, {"enabled": True, "email": "invalid"},
+                        {"enabled": True, "email": "ami@example.fr", "token": "not-allowed"}):
+            self.assertEqual(self.request("POST", "/api/mail", payload, headers)[0], 400)
+        error = web_app.MailError("Le service de rapports n’est pas encore configuré.", status=503)
+        with patch.object(self.app.mail, "_request", side_effect=error):
+            status, body, _ = self.request("POST", "/api/mail", {"enabled": True, "email": "ami@example.fr"}, headers)
+        self.assertEqual(status, 503)
+        self.assertIn("pas encore configuré", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["mail"]["status"], "error")
+        self.assertIsNone(self.app.process)
+        self.assertEqual(self.app.scheduler.install_calls, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

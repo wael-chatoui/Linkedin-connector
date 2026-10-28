@@ -1,6 +1,6 @@
 """
-Email reports through Resend (https://resend.com).
-Set RESEND_API_KEY + NOTIFY_EMAIL (and optionally RESEND_FROM) in .env.
+Reports through the FluentFlow relay, with private per-installation credentials.
+Legacy .env Resend settings apply only before central mail is configured.
 """
 
 import json
@@ -8,8 +8,24 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from mail_client import MailClient
 
 log = logging.getLogger(__name__)
+
+
+def send_report(data_dir, summary, *, legacy_subject=None, legacy_html=None):
+    """Use central mail first; evaluate optional legacy HTML only on fallback."""
+    try:
+        client = MailClient(data_dir)
+        if client.config_path.exists():
+            return client.deliver(summary)
+        if legacy_subject is not None and legacy_html is not None:
+            html = legacy_html() if callable(legacy_html) else legacy_html
+            return send_email(legacy_subject, html)
+    except Exception:
+        # A report failure must never affect invitations or reveal a credential.
+        log.warning("Le bilan par e-mail n’a pas pu être envoyé. Consultez l’application.")
+    return False
 
 
 def send_email(subject: str, html: str) -> bool:
@@ -34,10 +50,12 @@ def send_email(subject: str, html: str) -> bool:
                  "User-Agent": "linkedin-connector/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=20) as res:
-            log.info("Email sent to %s (%s)", to, json.loads(res.read()).get("id"))
+            res.read(32768)
+            log.info("Bilan par e-mail envoyé.")
         return True
     except urllib.error.HTTPError as e:
-        log.warning("Email failed: %s %s", e.code, e.read().decode(errors="replace")[:300])
-    except Exception as e:
-        log.warning("Email failed: %s", e)
+        log.warning("Le service e-mail a refusé le bilan (statut %s).", e.code)
+        e.close()
+    except Exception:
+        log.warning("Le service e-mail n’a pas pu être joint. Consultez la configuration dans l’application.")
     return False

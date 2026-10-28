@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from playwright.sync_api import sync_playwright, expect
 import web_app
+from mail_client import validate_email
 
 
 class FakeSchedule:
@@ -38,10 +39,61 @@ class FakeSchedule:
         self.installed = self.loaded = False
 
 
+class FixtureMail:
+    """An inbox confirmation is simulated locally; no mail request can escape."""
+
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.current = {"enabled": False, "email": "", "status": "unconfigured",
+                        "message": "Les bilans par e-mail ne sont pas activés.", "last_delivery": None}
+        self.requests = []
+        self.fail = False
+        self.timer = None
+
+    def state(self, *, refresh=True):
+        with self.lock:
+            return json.loads(json.dumps(self.current))
+
+    def configure(self, payload):
+        if (not isinstance(payload, dict) or payload.keys() - {"enabled", "email"}
+                or type(payload.get("enabled")) is not bool):
+            raise ValueError("Indiquez si les bilans par e-mail doivent être activés.")
+        with self.lock:
+            self.requests.append(dict(payload))
+            if self.timer:
+                self.timer.cancel()
+            if not payload["enabled"]:
+                self.current.update(enabled=False, status="disabled",
+                                    message="Les bilans par e-mail sont désactivés.")
+                return self.state()
+            email = validate_email(payload.get("email"))
+            if self.fail:
+                self.current.update(enabled=True, email=email, status="error",
+                                    message="Le service de bilans par e-mail est temporairement indisponible. Réessayez plus tard.")
+                raise web_app.MailError(self.current["message"])
+            self.current.update(enabled=True, email=email, status="pending",
+                                message="Un lien de confirmation a été envoyé.")
+
+            def confirm():
+                with self.lock:
+                    self.current.update(status="verified", message="Votre adresse est confirmée.")
+
+            self.timer = threading.Timer(3, confirm)
+            self.timer.daemon = True
+            self.timer.start()
+            return self.state()
+
+    def close(self):
+        with self.lock:
+            if self.timer:
+                self.timer.cancel()
+
+
 class FixtureApplication(web_app.Application):
     """Every UI action is local and simulated, even if a test forgets a route."""
 
     def __init__(self, *args, login_delay=0, **kwargs):
+        kwargs.setdefault("mail_client", FixtureMail())
         super().__init__(*args, **kwargs)
         self.actions = []
         self.login_delay = login_delay
@@ -109,6 +161,7 @@ class FixtureApplication(web_app.Application):
             self.stopping = True
             if self._login_timer:
                 self._login_timer.cancel()
+            self.mail.close()
         super().close()
 
 
@@ -198,6 +251,48 @@ def main():
                 expect(page.locator("#find-button")).to_be_disabled()
                 expect(page.locator("#send-button, #preview-button, .profile-checkbox")).to_have_count(0)
                 page.screenshot(path="/tmp/Linkedin-connector-first-open.png", full_page=True)
+
+                # Optional e-mail setup has its own form and never changes the
+                # LinkedIn automation or contacts the real FluentFlow service.
+                expect(page.locator("#mail-status")).to_contain_text("ne sont pas activés")
+                expect(page.locator("#mail-submit-button")).to_be_enabled()
+                page.locator("#mail-email").fill("adresse-invalide")
+                page.locator("#mail-submit-button").click()
+                expect(page.locator("#mail-email-error")).to_be_visible()
+                expect(page.locator("#mail-email")).to_be_focused()
+                assert not app.mail.requests
+                page.locator("#mail-email").fill("ami@exemple.fr")
+                assert not app.mail.requests, "Saisir une adresse ne doit pas envoyer de message."
+                app.mail.fail = True
+                page.locator("#mail-submit-button").click()
+                expect(page.locator("#mail-error")).to_contain_text("temporairement indisponible")
+                expect(page.locator("#login-button")).to_be_enabled()
+                app.mail.fail = False
+                page.locator("#mail-submit-button").click()
+                expect(page.locator("#mail-status")).to_contain_text("Confirmation en attente pour ami@exemple.fr")
+                expect(page.locator("#mail-confirmation-help")).to_be_visible()
+                expect(page.locator("#mail-confirmation-help")).to_contain_text("rapports@fluent-flow.fr")
+                expect(page.locator("#mail-status")).to_contain_text("Bilans activés pour ami@exemple.fr", timeout=8000)
+                expect(page.locator("#mail-submit-button")).to_be_disabled()
+                with app.mail.lock:
+                    app.mail.current["last_delivery"] = {"status": "error", "message": "Le dernier bilan est indisponible, les invitations ne sont pas affectées.",
+                                                         "attempted_at": datetime.now().astimezone().isoformat()}
+                page.reload()
+                expect(page.locator("#mail-last-delivery")).to_contain_text("n’a pas pu être envoyé")
+                page.locator("#mail-email").fill("adresse-invalide")
+                page.locator("#mail-submit-button").click()
+                expect(page.locator("#mail-email-error")).to_be_visible()
+                page.locator("#mail-disable-button").click()
+                expect(page.locator("#mail-status")).to_contain_text("désactivés")
+                expect(page.locator("#mail-disable-button")).to_be_hidden()
+                expect(page.locator("#mail-email")).to_have_value("ami@exemple.fr")
+                expect(page.locator("#mail-email")).to_have_attribute("aria-invalid", "false")
+                expect(page.locator("#mail-email-error")).to_be_hidden()
+                assert app.mail.requests[-1] == {"enabled": False}
+                assert not scheduler.loaded
+                with app.mail.lock:
+                    app.mail.current["last_delivery"] = None
+                page.reload()
 
                 # Keyboard-only connection: the backend fixture marks a session
                 # connected without launching Chromium or touching LinkedIn.
@@ -395,6 +490,7 @@ def main():
                 page.locator("#login-button").click()
                 expect(page.locator("#job-status")).to_contain_text("en cours")
                 expect(page.locator("#login-button")).to_be_disabled()
+                expect(page.locator("#mail-email")).to_be_enabled()
                 assert json.loads(app.settings_path.read_text())["keywords"] == "co-fondateur industrie"
                 expect(page.locator("#job-status")).to_contain_text("Connexion vérifiée", timeout=7000)
                 expect(page.locator("#settings-status")).to_contain_text("Brouillon enregistré")
@@ -418,7 +514,7 @@ def main():
                 assert app.worker is None and app.process is None
                 assert not errors, errors
                 browser.close()
-                print("UI validée : premier démarrage, connexion simulée, erreurs de champs, brouillon après connexion différée, activation différée, prochain passage, modification/annulation, pause/reprise, historique, reconnexion LinkedIn, erreur Internet, serveur indisponible, autre copie, clavier, mobile 320/390 px et agrandissement 200 %.")
+                print("UI validée : premier démarrage, bilans e-mail facultatifs et confirmation simulée, connexion simulée, erreurs de champs, brouillon après connexion différée, activation différée, prochain passage, modification/annulation, pause/reprise, historique, reconnexion LinkedIn, erreur Internet, serveur indisponible, autre copie, clavier, mobile 320/390 px et agrandissement 200 %.")
                 print("Aucune connexion LinkedIn réelle, aucune invitation, aucune tâche macOS. Captures : /tmp/Linkedin-connector-*.png")
         finally:
             app.close()
