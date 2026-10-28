@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs, urlsplit
 
 import linkedin_connect as engine
 from runtime_lock import OperationBusy, OperationLock, operation_in_progress
@@ -56,6 +57,100 @@ class EngineTests(unittest.TestCase):
         self.stack.enter_context(patch.object(engine, "sync_playwright"))
         self.stack.enter_context(patch.object(engine, "start", return_value=(context, page)))
         return context, page
+
+    def test_search_url_keeps_france_and_other_search_filters(self):
+        query = parse_qs(urlsplit(engine.search_url("fondateur santé & IA", 2, "S,O", engine.GEO_FRANCE)).query)
+        self.assertEqual(query, {
+            "keywords": ["fondateur santé & IA"], "network": ['["S","O"]'],
+            "geoUrn": [f'["{engine.GEO_FRANCE}"]'], "origin": ["FACETED_SEARCH"], "page": ["2"],
+        })
+
+    def test_international_search_url_omits_geography_filter(self):
+        for geo in [None, ""]:
+            with self.subTest(geo=geo):
+                query = parse_qs(urlsplit(engine.search_url("startup founder", 1, "S", geo)).query,
+                                 keep_blank_values=True)
+                self.assertNotIn("geoUrn", query)
+                self.assertEqual(query["keywords"], ["startup founder"])
+                self.assertEqual(query["network"], ['["S"]'])
+
+    def test_find_routes_france_international_and_legacy_paris(self):
+        cases = [({}, engine.GEO_FRANCE), ({"international": False}, engine.GEO_FRANCE),
+                 ({"international": True}, None), ({"paris": True}, engine.GEO_PARIS)]
+        for overrides, expected_geo in cases:
+            with self.subTest(overrides=overrides):
+                args = SimpleNamespace(keywords="startup founder", segments=None,
+                                       paris=False, pages=2, network="S,O")
+                for key, value in overrides.items():
+                    setattr(args, key, value)
+                context, page = self.browser()
+                with patch.object(engine, "find_prospects", return_value=0) as find:
+                    engine.cmd_find(args)
+                find.assert_called_once_with(page, [], [("custom", "startup founder")], 2, "S,O", expected_geo,
+                                             found_urls=set())
+                context.close.assert_called_once()
+
+    def test_find_snapshot_includes_known_matches_and_excludes_old_stock(self):
+        current, stale = prospect("current"), prospect("stale")
+        engine.save_rows(engine.PROSPECTS_CSV, [stale, current])
+        self.browser()
+        def find(_page, _rows, *_args, found_urls=None):
+            found_urls.add(current["url"])
+            return 0
+        args = SimpleNamespace(keywords="  santé, IA\n founder ", segments=None,
+                               international=True, paris=False, pages=1, network="S")
+        with patch.object(engine, "find_prospects", side_effect=find), \
+                patch.object(engine, "print_top") as show:
+            engine.cmd_find(args)
+        snapshot = json.loads((self.data_dir / "last_search.json").read_text())
+        self.assertEqual(snapshot["keywords"], ["santé, IA", "founder"])
+        self.assertEqual(snapshot["geography"], "international")
+        self.assertEqual(snapshot["urls"], [current["url"]])
+        self.assertIsNotNone(engine.datetime.fromisoformat(snapshot["finished_at"]).tzinfo)
+        self.assertEqual([row["url"] for row in show.call_args.args[0]], [current["url"]])
+        self.assertEqual(len(engine.load_rows(engine.PROSPECTS_CSV)), 2)
+
+    def test_empty_find_snapshot_does_not_reuse_old_results(self):
+        engine.save_rows(engine.PROSPECTS_CSV, [prospect("old")])
+        (self.data_dir / "last_search.json").write_text('{"urls": ["old"]}')
+        self.browser()
+        args = SimpleNamespace(keywords="new search", segments=None, international=False,
+                               paris=False, pages=1, network="S")
+        with patch.object(engine, "find_prospects", return_value=0), \
+                patch.object(engine, "print_top") as show:
+            engine.cmd_find(args)
+        snapshot = json.loads((self.data_dir / "last_search.json").read_text())
+        self.assertEqual(snapshot["urls"], [])
+        self.assertEqual(snapshot["geography"], "france")
+        show.assert_called_once_with([])
+
+    def test_failed_find_preserves_previous_completed_snapshot(self):
+        previous = '{"urls": ["previous"], "finished_at": "previous run"}'
+        (self.data_dir / "last_search.json").write_text(previous)
+        context, _page = self.browser()
+        args = SimpleNamespace(keywords="new search", segments=None, international=False,
+                               paris=False, pages=1, network="S")
+        with patch.object(engine, "find_prospects", side_effect=engine.Blocked("checkpoint")):
+            with self.assertRaises(engine.Blocked):
+                engine.cmd_find(args)
+        self.assertEqual((self.data_dir / "last_search.json").read_text(), previous)
+        context.close.assert_called_once()
+
+    def test_find_cli_accepts_international(self):
+        with patch.object(sys, "argv", ["linkedin_connect.py", "find", "--international"]), \
+                patch.object(engine, "cmd_find") as find:
+            engine.main()
+        args = find.call_args.args[0]
+        self.assertTrue(args.international)
+        self.assertFalse(args.paris)
+
+    def test_find_cli_rejects_conflicting_geographies_before_browser_start(self):
+        with patch.object(sys, "argv", ["linkedin_connect.py", "find", "--paris", "--international"]), \
+                patch.object(engine, "sync_playwright") as browser, patch.object(sys, "stderr"):
+            with self.assertRaises(SystemExit) as raised:
+                engine.main()
+        self.assertEqual(raised.exception.code, 2)
+        browser.assert_not_called()
 
     def test_selection_never_expands_to_other_eligible_profiles(self):
         chosen, unchosen = prospect("chosen", 60), prospect("unchosen", 100)
@@ -152,6 +247,49 @@ class EngineTests(unittest.TestCase):
             with self.assertRaises(engine.Blocked):
                 engine.start(MagicMock())
         context.close.assert_called_once()
+
+    def test_login_check_requires_the_linkedin_feed_page(self):
+        page = MagicMock()
+        cases = [
+            ("https://www.linkedin.com/feed/", True),
+            ("https://www.linkedin.com/feed?trk=login", True),
+            ("https://www.linkedin.com/login?session_redirect=/feed/", False),
+            ("https://www.linkedin.com/checkpoint/?redirect=/feed/", False),
+            ("https://other.example/feed/", False),
+        ]
+        with patch.object(engine, "goto"), patch.object(engine, "pause"):
+            for url, expected in cases:
+                with self.subTest(url=url):
+                    page.url = url
+                    self.assertEqual(engine.is_logged_in(page), expected)
+
+    def test_sent_invitation_is_recorded_before_a_followup_security_check(self):
+        row = prospect("one")
+        results = []
+        with patch.object(engine, "send_invite", return_value="sent"), \
+                patch.object(engine, "check_blocked", side_effect=engine.Blocked("checkpoint")):
+            with self.assertRaises(engine.Blocked):
+                engine.send_batch(MagicMock(), [row], [row], 1, False, results)
+        self.assertEqual(engine.sent_since(1), 1)
+        self.assertEqual(engine.load_rows(engine.PROSPECTS_CSV)[0]["status"], "sent")
+        self.assertEqual(results[0]["status"], "sent")
+
+    def test_sent_invitation_counts_toward_caps_when_prospects_cannot_be_saved(self):
+        row = prospect("one")
+        with patch.object(engine, "send_invite", return_value="sent"), \
+                patch.object(engine, "save_rows", side_effect=OSError("disk unavailable")), \
+                patch.object(engine, "check_blocked"):
+            with self.assertRaises(OSError):
+                engine.send_batch(MagicMock(), [row], [row], 1, False, [])
+        self.assertEqual(engine.sent_since(1), 1)
+        self.assertEqual(engine.remaining_budget(engine.DAILY_CAP), engine.DAILY_CAP - 1)
+
+    def test_empty_existing_sent_log_keeps_the_first_invitation(self):
+        engine.LOG_FILE.touch()
+        engine.log_sent("https://www.linkedin.com/in/first/")
+        engine.log_sent("https://www.linkedin.com/in/second/")
+        self.assertEqual(engine.sent_since(1), 2)
+        self.assertEqual(engine.LOG_FILE.read_text().count("date,url"), 1)
 
     def test_batch_and_enrichment_do_not_swallow_blocks(self):
         row = prospect("one")

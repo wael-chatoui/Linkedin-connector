@@ -10,12 +10,12 @@ Pipeline:
     python linkedin_connect.py find                       # people search -> scored prospects.csv
     python linkedin_connect.py find --segments founder,sales --pages 3
     python linkedin_connect.py find --keywords "fondateur agence immobilière"
+    python linkedin_connect.py find --keywords "startup founder" --international
     python linkedin_connect.py enrich --top 30            # check recent activity of best prospects
     python linkedin_connect.py run --dry-run              # preview, best scores first
     python linkedin_connect.py run --limit 15 --active-only
     python linkedin_connect.py run --limit 5 --note       # with personalised note
-    python linkedin_connect.py auto                       # daily pipeline + email report (launchd),
-                                                          # once per weekday, catches up at login
+    python linkedin_connect.py auto                       # scheduled pipeline using interface settings
 
 Targets: founders / CEOs / owners of startups & SMEs, sales & growth leaders —
 people who could hire a freelance full-stack / automation / AI developer.
@@ -30,6 +30,7 @@ import random
 import re
 import socket
 import sys
+import tempfile
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -37,6 +38,7 @@ from urllib.parse import quote, urlsplit
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, Error as PWError, TimeoutError as PWTimeout
+from app_settings import SettingsError, read_settings
 from runtime_lock import OperationBusy, OperationLock
 
 load_dotenv(Path(__file__).parent / ".env")
@@ -72,9 +74,8 @@ QUERIES = [
 
 # Free accounts get only a few personalised notes per month. Max 300 chars.
 NOTE_TEMPLATE = (
-    "Bonjour {first_name}, je suis freelance full-stack (Next.js, Python, automatisation, IA) "
-    "et j'aide les startups et PME à livrer vite leurs outils et produits. "
-    "Ravi d'échanger avec vous{company_part} !"
+    "Bonjour {first_name}, votre parcours m’intéresse. "
+    "Au plaisir d’échanger avec vous{company_part} !"
 )
 
 FIELDS = ["url", "name", "headline", "location", "mutual", "segment",
@@ -172,8 +173,8 @@ def sent_since(days: int) -> int:
 
 
 def log_sent(url: str) -> None:
-    new = not LOG_FILE.exists()
-    with LOG_FILE.open("a", newline="") as f:
+    new = not LOG_FILE.exists() or LOG_FILE.stat().st_size == 0
+    with LOG_FILE.open("a", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         if new:
             w.writerow(["date", "url"])
@@ -216,7 +217,9 @@ def pause(a: float = 1.0, b: float = 2.5) -> None:
 def is_logged_in(page) -> bool:
     goto(page, "https://www.linkedin.com/feed/")
     pause(2, 3)
-    return "/feed" in page.url
+    parsed = urlsplit(page.url)
+    return (parsed.scheme == "https" and parsed.hostname == "www.linkedin.com"
+            and parsed.path.rstrip("/") == "/feed")
 
 
 def blocked(page) -> bool:
@@ -297,16 +300,17 @@ def parse_card(text: str) -> dict | None:
     }
 
 
-def search_url(keywords: str, page_no: int, network: str, geo: str) -> str:
+def search_url(keywords: str, page_no: int, network: str, geo: str | None) -> str:
     nets = quote("[" + ",".join(f'"{n}"' for n in network.split(",")) + "]")
-    geos = quote(f'["{geo}"]')
+    geo_filter = "&geoUrn=" + quote(f'["{geo}"]') if geo else ""
     return ("https://www.linkedin.com/search/results/people/"
-            f"?keywords={quote(keywords)}&network={nets}&geoUrn={geos}"
+            f"?keywords={quote(keywords)}&network={nets}{geo_filter}"
             f"&origin=FACETED_SEARCH&page={page_no}")
 
 
-def find_prospects(page, rows: list[dict], queries, pages: int, network: str, geo: str) -> int:
-    """Appends new scored prospects to rows (saved as it goes). Returns how many were added."""
+def find_prospects(page, rows: list[dict], queries, pages: int, network: str, geo: str | None,
+                   found_urls: set[str] | None = None) -> int:
+    """Append prospects and optionally collect all URLs matching this search, including known ones."""
     known = {r["url"] for r in rows}
     added = 0
     for segment, kw in queries:
@@ -322,6 +326,8 @@ def find_prospects(page, rows: list[dict], queries, pages: int, network: str, ge
                 break
             for c in cards:
                 url = f"https://www.linkedin.com/in/{c['slug']}/"
+                if found_urls is not None:
+                    found_urls.add(url)
                 info = parse_card(c["text"])
                 if not info or url in known:
                     continue
@@ -339,24 +345,43 @@ def find_prospects(page, rows: list[dict], queries, pages: int, network: str, ge
 
 def cmd_find(args) -> None:
     if args.keywords:
-        queries = [("custom", args.keywords)]
+        queries = [("custom", line.strip()) for line in args.keywords.splitlines() if line.strip()]
     else:
         wanted = set(args.segments.split(",")) if args.segments else None
         queries = [q for q in QUERIES if not wanted or q[0] in wanted]
 
     rows = load_rows(PROSPECTS_CSV)
-    geo = GEO_PARIS if args.paris else GEO_FRANCE
+    geo = None if getattr(args, "international", False) else (GEO_PARIS if args.paris else GEO_FRANCE)
+    found_urls = set()
     with sync_playwright() as pw:
         ctx, page = start(pw)
         try:
-            added = find_prospects(page, rows, queries, args.pages, args.network, geo)
+            added = find_prospects(page, rows, queries, args.pages, args.network, geo,
+                                   found_urls=found_urls)
         finally:
             ctx.close()
 
     rescore(rows)
     save_rows(PROSPECTS_CSV, rows)
+    snapshot = {
+        "keywords": [keywords for _segment, keywords in queries],
+        "geography": "international" if geo is None else ("paris" if geo == GEO_PARIS else "france"),
+        "urls": sorted(found_urls),
+        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=".last-search-",
+                                         suffix=".tmp", dir=DATA_DIR, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(snapshot, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+        temporary.replace(DATA_DIR / "last_search.json")
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     print(f"\n+{added} nouveaux prospects ({len(rows)} au total) → {PROSPECTS_CSV}\n")
-    print_top([r for r in rows if not r["status"]])
+    print_top([r for r in rows if r["url"] in found_urls and not r["status"]])
 
 
 # ── enrich: recent activity ───────────────────────────────────────────────────
@@ -377,9 +402,11 @@ def last_post_days(page, url: str) -> int:
     return min(days) if days else 999
 
 
-def enrich_rows(page, rows: list[dict], top: int, min_score: int) -> int:
+def enrich_rows(page, rows: list[dict], top: int, min_score: int,
+                candidates: list[dict] | None = None) -> int:
     """Fills last_post_days for the best unchecked prospects. Returns how many were checked."""
-    todo = sorted((r for r in rows if not r["status"] and r["last_post_days"] == ""
+    source = rows if candidates is None else candidates
+    todo = sorted((r for r in source if not r["status"] and r["last_post_days"] == ""
                    and int(r["score"] or 0) >= min_score),
                   key=lambda r: -int(r["score"] or 0))[:top]
     print(f"Vérification de l'activité de {len(todo)} profils…")
@@ -524,29 +551,34 @@ def remaining_budget(limit: int) -> int:
 
 
 def send_batch(page, rows: list[dict], todo: list[dict], budget: int, note: bool,
-               results: list[dict]) -> None:
+               results: list[dict], before_send=None) -> None:
     """Sends up to `budget` invitations; appends every processed row to `results`."""
     sent = 0
     for r in todo:
         if sent >= budget:
             break
+        if before_send is not None:
+            before_send()
         try:
             status = send_invite(page, r, note)
         except Blocked:
             raise
         except Exception as e:  # keep going on UI surprises
             status = f"error_{type(e).__name__}"
-        check_blocked(page)
 
         r["status"] = status
         r["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        save_rows(PROSPECTS_CSV, rows)
         results.append(r)
+        if status == "sent":
+            sent += 1
+            # Record the invitation before another page check or CSV write can
+            # fail. A later security check must not erase it from the caps.
+            log_sent(r["url"])
+        save_rows(PROSPECTS_CSV, rows)
+        check_blocked(page)
         print(f"[{status}] {r['score']:>3}  {r['name']} — {r['headline'][:60]}")
 
         if status == "sent":
-            sent += 1
-            log_sent(r["url"])
             time.sleep(random.uniform(*DELAY_RANGE))
         else:
             pause(5, 10)
@@ -611,13 +643,8 @@ def cmd_run(args) -> None:
 
 # ── auto: daily pipeline + email report ───────────────────────────────────────
 
-REFILL_BELOW = 30      # search for new prospects when fewer eligible ones remain
-QUERIES_PER_RUN = 2    # rotate through QUERIES, 2 per day
-
-
-def todays_queries() -> list[tuple[str, str]]:
-    start_idx = (date.today().toordinal() * QUERIES_PER_RUN) % len(QUERIES)
-    return [QUERIES[(start_idx + i) % len(QUERIES)] for i in range(QUERIES_PER_RUN)]
+class AutomationPaused(Exception):
+    """The interface disabled the automation while a run was in progress."""
 
 
 def ran_today() -> bool:
@@ -625,6 +652,7 @@ def ran_today() -> bool:
 
 
 def mark_ran_today() -> None:
+    LAST_RUN_FILE.parent.mkdir(parents=True, exist_ok=True)
     LAST_RUN_FILE.write_text(date.today().isoformat())
 
 
@@ -640,62 +668,209 @@ def wait_for_network(timeout: int = 180) -> bool:
     return False
 
 
+def write_auto_status(status: str, message: str, started_at: str,
+                      settings: dict | None, report: dict, *,
+                      reason: str | None = None, summary: str | None = None) -> None:
+    """Publish a complete snapshot; readers never see half-written JSON."""
+    path = DATA_DIR / "automation_status.json"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    last_success = None
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(previous, dict):
+            last_success = previous.get("last_success_at")
+    except (OSError, ValueError):
+        pass
+    finished_at = None if status == "running" else datetime.now().astimezone().isoformat(timespec="seconds")
+    payload = {
+        "status": status, "message": message, "date": date.today().isoformat(),
+        "summary": summary or {
+            "running": "Recherche et invitations en cours.",
+            "success": "Le passage automatique est terminé.",
+            "skipped": "Aucune nouvelle invitation envoyée pendant ce passage.",
+        }.get(status, "Le passage automatique a rencontré un problème. Consultez les détails."),
+        "pid": os.getpid(),
+        "started_at": started_at, "finished_at": finished_at,
+        "last_success_at": finished_at if status == "success" else last_success,
+        "added": report["added"], "checked": report["checked"],
+        "matched": report.get("matched"), "eligible": report.get("eligible"),
+        "sent": sum(row["status"] == "sent" for row in report["results"]),
+        "settings": ({key: settings[key] for key in ("keywords", "geography", "limit")}
+                     if settings is not None else None),
+    }
+    if reason is not None:
+        payload["reason"] = reason
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=".auto-status-",
+                                         suffix=".tmp", dir=DATA_DIR, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def auto_failure_details(error: Exception) -> tuple[str, str]:
+    """Public guidance stays separate from exception details and URLs in logs."""
+    if isinstance(error, NotLoggedIn):
+        return "login", "Reconnectez votre compte LinkedIn depuis l’application."
+    if isinstance(error, Blocked):
+        return "linkedin_check", (
+            "LinkedIn demande une vérification ou applique une limite. "
+            "Ouvrez LinkedIn pour consulter ses indications avant le prochain passage."
+        )
+    if isinstance(error, SettingsError):
+        return "configuration", "Vérifiez les réglages dans l’application, puis enregistrez-les à nouveau."
+    network_error = isinstance(error, (ConnectionError, socket.gaierror)) or (
+        isinstance(error, PWError) and re.search(
+            r"net::ERR_(?:INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|CONNECTION_[A-Z_]+|"
+            r"NETWORK_CHANGED|ADDRESS_UNREACHABLE|TIMED_OUT)\b", str(error)
+        )
+    )
+    if network_error:
+        return "network", "LinkedIn est inaccessible. Vérifiez la connexion Internet avant le prochain passage."
+    return "error", "Le passage automatique n’a pas pu se terminer. Consultez les détails pour identifier le problème."
+
+
 def cmd_auto(args) -> None:
     from notify import send_email
 
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    # Triggered both at login (catch-up) and at the scheduled hour: run once per weekday.
-    if not args.force:
-        if date.today().weekday() >= 5:
-            print(f"[{stamp}] week-end — rien à faire.")
-            return
-        if ran_today():
-            print(f"[{stamp}] déjà exécuté aujourd'hui — rien à faire.")
-            return
-        if not PROFILE_DIR.exists():
-            print(f"[{stamp}] jamais connecté — lance d'abord `linkedin_connect.py login`.")
-            return
-    if not wait_for_network():
-        print(f"[{stamp}] pas de réseau — nouvel essai au prochain déclenchement.")
-        return
-    print(f"[{stamp}] exécution du jour")
+    started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    settings = None
+    report = {"added": 0, "checked": 0, "matched": None, "eligible": None,
+              "results": [], "error": None, "queries": []}
 
-    rows = load_rows(PROSPECTS_CSV)
-    report = {"added": 0, "checked": 0, "results": [], "error": None, "queries": []}
-    failure = None
-    budget = remaining_budget(args.limit)
+    def finish(status, message, *, reason=None, summary=None):
+        print(f"[{started_at}] {message}")
+        write_auto_status(status, message, started_at, settings, report, reason=reason, summary=summary)
 
     try:
+        # Never reuse the web server's memory or fall back to predefined searches.
+        settings = read_settings(DATA_DIR / "settings.json")
+    except FileNotFoundError:
+        finish("skipped", "Aucun réglage enregistré. Configure l'automatisation dans l'interface.",
+               reason="configuration", summary="Choisissez vos critères dans l’application, puis activez l’automatisation.")
+        return
+    except (OSError, ValueError) as error:
+        finish("error", f"Impossible de lire les réglages : {error}", reason="configuration",
+               summary="Les réglages ne peuvent pas être lus. Ouvrez l’application pour les vérifier.")
+        raise
+    if not settings["automation_enabled"]:
+        finish("skipped", "L'automatisation est en pause.",
+               summary="L’automatisation est en pause. Aucun envoi automatique n’est prévu.")
+        return
+    if not settings["keywords"]:
+        finish("skipped", "Aucun mot-clé configuré. Aucune invitation envoyée.", reason="configuration",
+               summary="Ajoutez au moins une recherche dans l’application pour choisir qui inviter.")
+        return
+    if not getattr(args, "force", False):
+        if settings["schedule_days"] == "weekdays" and date.today().weekday() >= 5:
+            finish("skipped", "Week-end : le programme est limité aux jours ouvrés.",
+                   summary="Aucun envoi prévu le week-end avec les jours choisis.")
+            return
+        if ran_today():
+            finish("skipped", "L'automatisation a déjà été exécutée aujourd'hui.",
+                   summary="Le passage d’aujourd’hui a déjà eu lieu. Aucun nouvel envoi ne sera lancé aujourd’hui.")
+            return
+    if not PROFILE_DIR.exists():
+        finish("skipped", "Connecte d'abord ton compte LinkedIn dans l'interface.", reason="login",
+               summary="Connectez votre compte LinkedIn depuis l’application avant le prochain passage.")
+        return
+
+    failure = None
+    rows, candidates = [], []
+    budget = 0
+    failure_reason = None
+
+    def ensure_enabled():
+        nonlocal failure_reason
+        # A pause takes effect between invitations, never halfway through a send.
+        try:
+            enabled = read_settings(DATA_DIR / "settings.json")["automation_enabled"]
+        except (OSError, ValueError):
+            failure_reason = "configuration"
+            raise
+        if not enabled:
+            raise AutomationPaused("Automatisation mise en pause. Aucune nouvelle invitation ne sera envoyée.")
+
+    try:
+        budget = remaining_budget(settings["limit"])
+        if not budget:
+            finish("skipped", "Le plafond quotidien ou hebdomadaire est atteint.", reason="quota",
+                   summary="Le plafond d’invitations est atteint. Le prochain passage vérifiera à nouveau la limite disponible.")
+            return
+        finish("running", "Automatisation en cours avec les réglages enregistrés.")
+        if not wait_for_network():
+            finish("skipped", "Pas de réseau. Nouvel essai au prochain déclenchement.", reason="network",
+                   summary="LinkedIn est inaccessible. Vérifiez la connexion Internet avant le prochain passage.")
+            return
+        ensure_enabled()
+        rows = load_rows(PROSPECTS_CSV)
+        report["queries"] = [("custom", line.strip()) for line in settings["keywords"].splitlines()
+                             if line.strip()]
+        geo = GEO_FRANCE if settings["geography"] == "france" else None
+        found_urls = set()
         with sync_playwright() as pw:
             ctx, page = start(pw)
             try:
-                if len(eligible(rows, args.min_score)) < REFILL_BELOW:
-                    report["queries"] = todays_queries()
-                    report["added"] = find_prospects(page, rows, report["queries"], 2, "S", GEO_FRANCE)
-                report["checked"] = enrich_rows(page, rows, args.enrich, args.min_score)
-                if budget:
-                    send_batch(page, rows, eligible(rows, args.min_score), budget, args.note,
-                               report["results"])
+                report["added"] = find_prospects(page, rows, report["queries"], settings["pages"],
+                                                  settings["network"], geo, found_urls=found_urls)
+                # Old CSV rows are retained, but only today's matching profiles can be sent.
+                candidates = [row for row in rows if row["url"] in found_urls]
+                report["matched"] = len(candidates)
+                ensure_enabled()
+                report["checked"] = enrich_rows(page, rows, getattr(args, "enrich", 20),
+                                                  settings["min_score"], candidates=candidates)
+                ensure_enabled()
+                todo = eligible(candidates, settings["min_score"], settings["active_only"])
+                report["eligible"] = len(todo)
+                send_batch(page, rows, todo,
+                           budget, settings["note"], report["results"], before_send=ensure_enabled)
             finally:
                 ctx.close()
         mark_ran_today()
-    except Blocked as e:
-        failure = e
-        report["error"] = str(e)
-        mark_ran_today()  # don't insist the same day
-    except NotLoggedIn as e:
-        failure = e
-        report["error"] = str(e)  # retried at next trigger, once logged in again
-    except Exception as e:
-        failure = e
-        report["error"] = f"{type(e).__name__}: {e}"
+    except AutomationPaused as error:
+        mark_ran_today()
+        finish("skipped", str(error), summary="La pause a été prise en compte. Aucun nouvel envoi ne commencera.")
+        return
+    except Blocked as error:
+        failure = error
+        report["error"] = str(error)
+        mark_ran_today()  # Do not retry a LinkedIn limit or security check the same day.
+    except Exception as error:
+        failure = error
+        report["error"] = f"{type(error).__name__}: {error}"
 
-    sent = [r for r in report["results"] if r["status"] == "sent"]
+    sent = sum(row["status"] == "sent" for row in report["results"])
+    reason = None
+    summary = f"{sent} invitation{'s' if sent != 1 else ''} envoyée{'s' if sent != 1 else ''}."
+    if failure:
+        reason, summary = auto_failure_details(failure)
+        if failure_reason == "configuration":
+            reason = failure_reason
+            summary = "Les réglages ne peuvent plus être lus. Ouvrez l’application pour les vérifier."
+        if sent:
+            summary = f"{sent} invitation{'s' if sent != 1 else ''} déjà envoyée{'s' if sent != 1 else ''}. {summary}"
+    elif report["matched"] == 0:
+        reason = "no_matches"
+        summary = "Aucun profil trouvé avec ces recherches. Vérifiez les mots-clés et la localisation."
+    elif report["eligible"] == 0:
+        reason = "no_eligible"
+        summary = "Des profils ont été trouvés, mais aucun ne passe les filtres ou ne reste à inviter. Vérifiez les options de sélection."
+    elif any(str(row.get("status", "")).startswith("error") for row in report["results"]):
+        reason = "error"
+        summary += " Certaines invitations n’ont pas abouti. Consultez les détails avant de réessayer."
+    elif not sent:
+        reason = "no_eligible"
+        summary = "Aucune nouvelle invitation envoyée : les profils retenus n’ont pas pu être invités sur LinkedIn. Consultez leurs statuts."
+    finish("error" if failure else "success", report["error"] or f"{sent} invitation(s) envoyée(s).",
+           reason=reason, summary=summary)
     subject = (f"⚠️ LinkedIn auto : {report['error'][:60]}" if report["error"] and not sent
-               else f"LinkedIn : {len(sent)} invitation(s) envoyée(s)")
-    html = render_report(report, rows, budget, args.min_score)
-    print(subject)
-    send_email(subject, html)
+               else f"LinkedIn : {sent} invitation(s) envoyée(s)")
+    send_email(subject, render_report(report, candidates, budget, settings["min_score"]))
     if failure is not None:
         raise failure
 
@@ -784,7 +959,9 @@ def main() -> None:
     f.add_argument("--keywords", help="recherche libre à la place des requêtes prédéfinies")
     f.add_argument("--pages", type=int, default=2, help="pages de résultats par requête (10/page)")
     f.add_argument("--network", default="S", help="S=2e degré, O=3e+ (ex: S,O)")
-    f.add_argument("--paris", action="store_true", help="région parisienne au lieu de toute la France")
+    geography = f.add_mutually_exclusive_group()
+    geography.add_argument("--paris", action="store_true", help="région parisienne au lieu de toute la France")
+    geography.add_argument("--international", action="store_true", help="monde entier, sans filtre géographique")
     f.set_defaults(func=cmd_find)
 
     e = sub.add_parser("enrich", help="vérifie l'activité récente des meilleurs prospects")
@@ -804,11 +981,8 @@ def main() -> None:
     r.add_argument("--selected-file", type=Path, help="liste JSON des seules URL de profils autorisées")
     r.set_defaults(func=cmd_run)
 
-    a = sub.add_parser("auto", help="pipeline quotidien (find si besoin → enrich → run) + e-mail")
-    a.add_argument("--limit", type=int, default=15)
-    a.add_argument("--min-score", type=int, default=MIN_SCORE)
+    a = sub.add_parser("auto", help="recherche et envoi automatiques selon les réglages de l'interface")
     a.add_argument("--enrich", type=int, default=20, help="profils dont on vérifie l'activité")
-    a.add_argument("--note", action="store_true")
     a.add_argument("--force", action="store_true", help="ignore week-end et « déjà exécuté aujourd'hui »")
     a.set_defaults(func=cmd_auto)
 

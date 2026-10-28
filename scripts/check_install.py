@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Small installer checks, with no LinkedIn session or personal-data access."""
+"""Local installation checks and opt-in scheduling, without opening LinkedIn."""
 
 import importlib
 import importlib.metadata
 import os
 from pathlib import Path
-import plistlib
 import sys
 
 
@@ -42,22 +41,61 @@ def chromium() -> bool:
         return False
 
 
-def schedule(project: Path, label: str, target: Path, hour: int, minute: int) -> None:
-    """plistlib escapes paths and names, including spaces, & and non-ASCII."""
-    job = {
-        "Label": label,
-        "ProgramArguments": [str(project / ".venv/bin/python"), str(project / "linkedin_connect.py"), "auto"],
-        "WorkingDirectory": str(project),
-        "RunAtLoad": False,
-        "StartCalendarInterval": [
-            {"Weekday": day, "Hour": hour, "Minute": minute}
-            for day in range(1, 6)
-        ],
-        "StandardOutPath": str(project / "linkedin_data/auto.log"),
-        "StandardErrorPath": str(project / "linkedin_data/auto.log"),
-        "EnvironmentVariables": {"PYTHONUNBUFFERED": "1"},
-    }
-    target.write_bytes(plistlib.dumps(job))
+def schedule(project: Path) -> None:
+    """Use exactly the same saved settings and scheduler as the web interface."""
+    sys.path.insert(0, str(project.resolve()))
+    from app_settings import read_settings, write_settings
+    from automation_schedule import ScheduleManager
+    from runtime_lock import OperationLock
+
+    manager = ScheduleManager(project)
+    settings_path = manager.data_dir / "settings.json"
+    with OperationLock(manager.data_dir / ".operation.lock"):
+        try:
+            previous = read_settings(settings_path)
+        except FileNotFoundError as exc:
+            raise ValueError("Enregistre d'abord des mots-clés dans l'interface avant d'utiliser --schedule.") from exc
+        if not previous["keywords"]:
+            raise ValueError("Enregistre d'abord des mots-clés dans l'interface avant d'utiliser --schedule.")
+        settings = {**previous, "automation_enabled": True}
+        # Leave sends disabled if installation is interrupted before completion.
+        write_settings(settings_path, {**settings, "automation_enabled": False})
+        manager.install(settings)
+        write_settings(settings_path, settings)
+    days = "tous les jours" if settings["schedule_days"] == "everyday" else "du lundi au vendredi"
+    print(f"✓ Automatisation activée {days} à {settings['schedule_time']} (sans envoi immédiat).")
+
+
+def unschedule(project: Path) -> None:
+    """Pause this data directory and remove only a verified, owned schedule."""
+    sys.path.insert(0, str(project.resolve()))
+    from app_settings import SettingsError, read_settings, write_settings
+    from automation_schedule import ScheduleError, ScheduleManager
+    from runtime_lock import OperationBusy, OperationLock
+
+    manager = ScheduleManager(project)
+    if not manager.supported:
+        raise ScheduleError("La suppression de la planification nécessite macOS.")
+    state = manager.status()
+    if state.get("foreign") or state.get("error"):
+        raise ScheduleError(state.get("error") or "Cette tâche appartient à une autre installation.")
+    settings_path = manager.data_dir / "settings.json"
+    try:
+        previous = read_settings(settings_path)
+    except (FileNotFoundError, SettingsError):
+        # Missing or invalid settings already prevent automatic sends. Keep
+        # the file intact so removing a schedule never repairs or erases data.
+        previous = None
+    if previous is not None:
+        # A running automation checks this switch before each invitation.
+        write_settings(settings_path, {**previous, "automation_enabled": False})
+    try:
+        with OperationLock(manager.data_dir / ".operation.lock"):
+            manager.uninstall()
+    except OperationBusy as exc:
+        raise ScheduleError("Les envois sont en pause. Une opération est encore en cours ; "
+                            "relancez uninstall.sh après sa fin pour retirer le calendrier.") from exc
+    print("✓ Automatisation en pause et calendrier supprimé. Vos réglages, votre connexion LinkedIn et votre historique sont conservés.")
 
 
 if __name__ == "__main__":
@@ -66,7 +104,10 @@ if __name__ == "__main__":
         sys.exit(0 if dependencies(Path(sys.argv[2])) else 1)
     elif action == "chromium":
         sys.exit(0 if chromium() else 1)
-    elif action == "schedule":
-        schedule(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6]))
+    elif action in ("schedule", "unschedule"):
+        try:
+            {"schedule": schedule, "unschedule": unschedule}[action](Path(sys.argv[2]))
+        except (ValueError, RuntimeError, OSError) as exc:
+            raise SystemExit(f"Erreur : {exc}") from exc
     else:
         raise SystemExit(f"Action inconnue : {action}")

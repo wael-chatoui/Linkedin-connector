@@ -1,40 +1,107 @@
 # LinkedIn Connector
 
-Une interface locale pour rechercher des profils LinkedIn par mots-clés, consulter leur score et choisir les personnes à inviter. La session LinkedIn et les prospects restent sur votre ordinateur.
+Choisissez les personnes à rechercher sur LinkedIn et l’heure d’envoi. L’application peut ensuite leur envoyer des invitations automatiquement. Vous pouvez modifier vos choix ou mettre les envois en pause depuis une page dans votre navigateur.
 
-## Démarrer avec une seule commande
+**Pour commencer : un Mac avec macOS 14 ou plus récent, une connexion Internet et votre compte LinkedIn.** Aucun logiciel de programmation à installer vous-même. La planification automatique fonctionne sur Mac ; Windows n’est pas pris en charge.
 
-Dans le dossier du projet, exécutez :
+## Première ouverture sur Mac
+
+1. [Téléchargez la version 1.0.0 pour Mac](https://github.com/wael-chatoui/Linkedin-connector/archive/refs/tags/v1.0.0.zip). Vous pouvez aussi [ouvrir le projet sur GitHub](https://github.com/wael-chatoui/Linkedin-connector), puis choisir **Code > Download ZIP** pour obtenir la version en cours de développement.
+2. Dans Téléchargements, ouvrez le fichier ZIP. Déplacez le dossier obtenu dans **Documents**, ou un autre endroit où vous souhaitez le garder. Ne le déplacez plus après avoir activé l’automatisation.
+3. Dans ce dossier, double-cliquez sur **Démarrer.command**. Une fenêtre nommée Terminal s’ouvre : c’est normal. Vous n’avez rien à y taper.
+4. Attendez la fin des quatre étapes. Au premier démarrage, les outils nécessaires sont téléchargés ; cela peut prendre plusieurs minutes. Une page s’ouvre ensuite dans votre navigateur.
+
+**Pour rouvrir une installation existante, commencez directement à l’étape 3.** Le même double-clic conserve vos réglages et votre historique. Pour installer une nouvelle version, suivez plutôt [la mise à jour ci-dessous](#mettre-à-jour-sans-perdre-vos-données). Gardez la fenêtre Terminal ouverte pendant que vous utilisez la page.
+
+Si macOS bloque l’ouverture, consultez [Besoin d’aide ?](#besoin-daide). Ce projet est distribué sous forme de dossier, pas encore comme une application Mac signée.
+
+## Vos premiers réglages
+
+1. Cliquez sur **Se connecter à LinkedIn** sur la page. Une autre fenêtre de navigateur, appelée Chromium, s’ouvre. Connectez-vous sur LinkedIn dans cette fenêtre, même si vous l’êtes déjà dans Safari ou Chrome. Effectuez les éventuelles vérifications demandées par LinkedIn. Votre connexion sera mémorisée pour les prochaines fois.
+2. **Choisir les personnes à rechercher.** Écrivez une recherche par ligne, jusqu’à dix lignes. Par exemple :
+
+   ```text
+   fondateur SaaS
+   dirigeant PME
+   ```
+
+3. **Où rechercher ?** Choisissez : France, ou International pour tous les pays.
+4. Réglez **Maximum d’invitations par jour**, **Quels jours ?** et **À quelle heure ?**. Au départ : au plus 3 invitations, tous les jours à 10 h 30, week-end compris. L’heure est celle du Mac.
+5. Cliquez sur **Activer l’automatisation**. L’application enregistre vos choix. Le premier envoi attend l’heure prévue : cliquer sur Activer ne lance pas d’invitation immédiatement.
+
+Vous pouvez d’abord **Tester la recherche sans envoyer** pour voir les résultats. Ce test ne programme pas les envois : l’activation reste nécessaire.
+
+**Le maximum est partagé entre toutes vos recherches.** Avec 5 invitations maximum et 3 lignes de mots-clés, il y aura au plus 5 invitations au total pendant le passage, pas 15. Il peut y en avoir moins si les résultats ou les filtres ne permettent pas d’atteindre ce nombre.
+
+L’application applique aussi un plafond de **80 invitations sur les 7 derniers jours**. Avec un maximum de 15 par jour, certains jours peuvent donc compter moins d’envois. Le test de recherche affiche ses propres résultats ; choisissez **Tous les profils enregistrés** pour retrouver l’historique complet.
+
+La version installée est indiquée tout en bas de la page. Consultez les [notes de version](CHANGELOG.md) pour voir les changements.
+
+## Au quotidien
+
+| Je veux… | Ce que je fais |
+|---|---|
+| Rouvrir mes réglages | Je double-clique sur **Démarrer.command**, dans le même dossier. |
+| Changer les mots-clés, le pays, le maximum ou l’heure | Je modifie la page puis clique sur **Enregistrer les modifications**. Les prochains passages utilisent ces choix. |
+| Arrêter les invitations | Je clique sur **Mettre en pause**. Les invitations déjà envoyées restent envoyées. |
+| Reprendre les invitations | Je vérifie mes réglages puis j’active à nouveau l’automatisation. |
+| Voir ce qui s’est passé | Je consulte le dernier passage et les résultats sur la page. |
+
+Une fois l’automatisation activée, vous pouvez fermer la page et le Terminal. **Pour fonctionner à l’heure choisie, le Mac doit rester allumé, éveillé, connecté à Internet et avec votre session macOS ouverte.** Une fenêtre Chromium pourra apparaître pendant le travail. Si le Mac est éteint ou en veille à l’heure prévue, le rattrapage n’est pas garanti.
+
+Fermer la page ou le Terminal **ne met pas les envois en pause**. Utilisez le bouton **Mettre en pause**. Si un passage a commencé, la pause empêche l’invitation suivante ; elle n’annule pas un clic d’envoi déjà en cours.
+
+## Mettre à jour sans perdre vos données
+
+Gardez le dossier installé à son emplacement actuel : il contient vos réglages, votre historique et votre connexion LinkedIn. **Ne remplacez pas ce dossier entier par le nouveau téléchargement.**
+
+1. Dans l’application, cliquez sur **Mettre en pause**. Attendez la fin de toute opération en cours, puis fermez sa fenêtre Terminal.
+2. Dans le Finder, sélectionnez votre dossier installé et choisissez **Fichier > Dupliquer**. Cette copie est votre sauvegarde ; gardez-la sur votre Mac sans l’ouvrir pendant la mise à jour.
+3. Téléchargez la nouvelle version depuis le même projet GitHub et ouvrez le ZIP dans **Téléchargements**. Laissez ce nouveau dossier à part.
+4. Ouvrez le nouveau dossier, sélectionnez son **contenu** avec Commande + A, puis copiez-le avec Commande + C. Ouvrez ensuite votre dossier installé d’origine et collez avec Commande + V. Acceptez le remplacement des fichiers du programme et la fusion des sous-dossiers si le Finder la propose.
+5. Double-cliquez sur **Démarrer.command dans le dossier d’origine**. Le lanceur vérifie les dépendances de cette version. Vérifiez vos mots-clés, votre maximum et l’heure, puis cliquez sur **Activer l’automatisation** lorsque vous souhaitez reprendre.
+
+Le ZIP du projet ne contient ni `linkedin_data/`, ni `.env`, ni `.venv/`, ni `.runtime/`. Ces éléments de votre installation restent en place. Le dossier `linkedin_data/` conserve notamment les cookies de connexion et le journal utilisé pour les plafonds d’envoi. LinkedIn peut malgré tout demander une nouvelle connexion si la session a expiré.
+
+Pour partager l’application avec un ami, envoyez le lien de téléchargement GitHub. Votre dossier installé et sa sauvegarde contiennent des données personnelles, dont votre session LinkedIn.
+
+## Besoin d’aide ?
+
+| Ce que vous voyez | Que faire |
+|---|---|
+| macOS bloque le premier lancement | Si le message concerne un développeur non identifié et que vous faites confiance à cette copie, ouvrez **Réglages Système > Confidentialité et sécurité**, puis **Ouvrir quand même** après la tentative d’ouverture. Suivez [les instructions Apple](https://support.apple.com/fr-fr/102445). Si l’alerte indique un fichier malveillant ou endommagé, arrêtez-vous et téléchargez à nouveau depuis le projet officiel. |
+| « Permission refusée » ou fichier impossible à exécuter | L’archive a peut-être perdu le droit de lancer le fichier. La méthode de secours avec Terminal est décrite juste après ce tableau. |
+| Le téléchargement s’arrête | Rétablissez Internet, puis double-cliquez à nouveau sur **Démarrer.command**. Vos réglages sont conservés. |
+| Rien ne s’ouvre dans le navigateur | Laissez Terminal ouvert et ouvrez [la page locale](http://127.0.0.1:8765). Si elle reste inaccessible, lisez le dernier message de Terminal. |
+| LinkedIn demande de se reconnecter | Utilisez la connexion LinkedIn sur la page et terminez la connexion dans la fenêtre Chromium. |
+| Aucun envoi | Vérifiez que l’automatisation est active, que l’heure choisie est passée et que le Mac était disponible. Consultez le dernier passage : il indique le résultat ou le problème à résoudre. |
+| La recherche ne donne rien | Essayez des mots-clés plus simples, ou International, puis testez de nouveau la recherche. Vérifiez aussi **Options de recherche et message joint**. |
+| Les invitations partent encore après fermeture de la page | C’est normal si l’automatisation est active. Rouvrez l’application et cliquez sur **Mettre en pause**. |
+
+<details>
+<summary>Ouvrir avec Terminal si le double-clic ne fonctionne pas</summary>
+
+1. Ouvrez **Terminal** avec la recherche Spotlight du Mac (Commande + Espace, puis « Terminal »).
+2. Tapez `bash` suivi d’un espace.
+3. Glissez le fichier **install.sh** depuis le dossier du projet vers cette fenêtre. Le Mac écrit son chemin à votre place.
+4. Appuyez sur Entrée. L’installation et l’ouverture de la page commencent.
+
+Cette méthode évite de taper le chemin du dossier, même si son nom contient des espaces. Elle ne doit pas servir à ignorer une alerte indiquant qu’un fichier est malveillant ou endommagé.
+
+</details>
+
+## Pour les personnes qui utilisent le terminal
+
+Depuis le dossier du projet, une seule commande installe les éléments manquants et ouvre la page :
 
 ```bash
 ./install.sh
 ```
 
-Le script installe les dépendances manquantes, prépare Chromium puis ouvre votre navigateur sur [http://127.0.0.1:8765](http://127.0.0.1:8765). Si Python 3.10 ou plus récent n'est pas disponible, il installe un Python local au projet. Vous n'avez pas besoin de Homebrew, de Node.js ou de configurer un service d'e-mail.
+Python est installé localement si nécessaire. Vous n’avez besoin ni de Homebrew, ni de Node.js, ni d’un service d’e-mail. **Ctrl+C** arrête le serveur local, mais ne suspend pas une automatisation déjà activée.
 
-Gardez le terminal ouvert pendant l'utilisation. **Ctrl+C** arrête le serveur. La même commande relance l'application les fois suivantes, sans mettre systématiquement à jour les dépendances ni les retélécharger.
-
-Si le projet n'est pas encore sur votre ordinateur, téléchargez-le depuis GitHub ou clonez-le une fois :
-
-```bash
-git clone https://github.com/wael-chatoui/Linkedin-connector.git
-cd Linkedin-connector
-./install.sh
-```
-
-Le parcours principal vise **macOS 14 ou plus récent**, avec une connexion Internet pour la première installation et les actions LinkedIn. Une session graphique est nécessaire. Le lanceur fonctionne aussi sous Linux, avec les réserves indiquées dans « Dépannage ». Windows natif n'est pas pris en charge par ce script.
-
-## Utiliser l'interface
-
-1. **Connectez LinkedIn** depuis la page locale. Une fenêtre Chromium s'ouvre : connectez-vous vous-même et effectuez les éventuelles vérifications demandées par LinkedIn. L'application ne demande jamais votre mot de passe.
-2. **Saisissez vos mots-clés**, par exemple `fondateur agence immobilière`, choisissez les options de recherche puis lancez la recherche.
-3. **Consultez les résultats** : identité, titre, score et statut. Vous pouvez vérifier l'activité récente et recalculer les scores.
-4. **Sélectionnez les profils** à inviter et consultez l'aperçu. L'aperçu n'envoie aucune invitation.
-5. **Lancez explicitement l'envoi** après avoir vérifié votre sélection et la limite affichée. Le journal permet de suivre la progression.
-
-L'installation, l'ouverture de la page et une recherche ne déclenchent aucun envoi. La recherche utilise LinkedIn dans une fenêtre Chromium distincte de l'onglet de contrôle. L'authentification LinkedIn reste une étape manuelle.
-
-Les invitations sont soumises au score minimum, aux statuts déjà enregistrés et aux plafonds du projet : **20 par jour et 80 sur sept jours glissants**, avec des pauses entre les actions. Ces limites locales ne garantissent pas l'absence de restriction par LinkedIn. LinkedIn peut demander une vérification, faire expirer la session ou modifier son interface.
+<details>
+<summary>Options, données, fonctionnement et vérifications techniques</summary>
 
 ## Options du lanceur
 
@@ -44,6 +111,7 @@ Les invitations sont soumises au score minimum, aux statuts déjà enregistrés 
 | Utiliser un autre port | `./install.sh --port 8877` |
 | Garder le serveur sans ouverture automatique d'onglet | `./install.sh --no-browser` |
 | Installer seulement, sans lancer le serveur | `./install.sh --install-only` |
+| Activer avec les réglages déjà enregistrés, sous macOS | `./install.sh --schedule` |
 | Consulter l'aide | `./install.sh --help` |
 
 `--no-schedule` reste accepté pour les anciennes commandes et correspond au comportement par défaut. Il ne supprime pas une tâche existante. `PYTHON=/chemin/vers/python3 ./install.sh` permet de choisir l'interpréteur lors de la création de l'environnement ; un environnement `.venv` déjà fonctionnel est réutilisé.
@@ -62,10 +130,13 @@ Les fichiers personnels sont ignorés par Git :
 |---|---|
 | `linkedin_data/prospects.csv` | Profils trouvés, score, raison du score et statut |
 | `linkedin_data/sent_log.csv` | Historique utilisé pour les plafonds d'envoi |
-| `linkedin_data/settings.json` | Mots-clés et réglages de l'interface locale |
+| `linkedin_data/settings.json` | Ciblage, maximum par exécution, horaire, fréquence et état actif ou en pause |
 | `linkedin_data/.profile/` | Session Chromium, notamment les cookies LinkedIn |
-| `linkedin_data/auto.log` | Journal de l'automatisation optionnelle |
-| `linkedin_data/last_auto_run.txt` | Dernière exécution automatique réussie |
+| `~/Library/Logs/Linkedin-connector/<identifiant>/auto.log` | Journal détaillé de l’automatisation macOS, propre à ce dossier de données |
+| `linkedin_data/auto.log` | Ancien journal, conservé et encore visible dans l’interface |
+| `linkedin_data/automation_status.json` | Dernière exécution, réglages utilisés, résultats et erreurs |
+| `linkedin_data/last_auto_run.txt` | Jour déjà traité, pour éviter de répéter les envois |
+| `linkedin_data/last_search.json` | Résultats et critères du dernier test de recherche, distincts de l’historique |
 | `.env` | Configuration optionnelle des e-mails |
 | `.venv/`, `.runtime/` | Environnement Python et outils d'installation |
 
@@ -83,35 +154,37 @@ L'application fonctionne sans `.env` et sans compte Resend. Pour les rapports du
 
 Le lanceur ne crée ni ne modifie `.env`. Consultez [Resend](https://resend.com) pour configurer l'envoi et les restrictions de votre compte.
 
-## Planification quotidienne, uniquement sur demande
+## Fonctionnement de la planification macOS
 
-**Aucune nouvelle tâche planifiée n'est activée par `./install.sh`.** Si une ancienne version a déjà installé une tâche launchd, elle continue de fonctionner : le lanceur et l'interface vous le signalent. Pour la retirer tout en conservant vos données :
+`./install.sh` ouvre l’interface ; l’automatisation s’active depuis cette interface après saisie des mots-clés. La tâche macOS utilise les mêmes réglages que la page, conservés dans `linkedin_data/settings.json`. Il n’existe plus de recherches prédéfinies utilisées en secours dans le mode `auto`. Sans configuration valide, sans mots-clés ou lorsque l’automatisation est en pause, ce mode n’envoie rien.
 
-```bash
-./uninstall.sh
-```
+L’activation crée ou remplace la tâche launchd `com.<utilisateur>.linkedin-connector`, à l’heure et aux jours choisis. Elle ne démarre pas le pipeline à l’activation ni à chaque ouverture de session. Les réglages initiaux sont **tous les jours à 10h30** ; l’horaire enregistré est conservé tant que vous ne le modifiez pas dans l’interface.
 
-Pour activer volontairement le pipeline quotidien sous macOS :
+Le navigateur de configuration et le terminal peuvent être fermés. Pour une exécution à l’heure prévue, le Mac doit être allumé, disposer d’une connexion Internet et avoir une session macOS ouverte permettant à Chromium de s’afficher. La session LinkedIn mémorisée doit rester valide. Le projet ne garantit pas le rattrapage des exécutions manquées pendant l’arrêt ou la veille du Mac. Une exécution réussie ou bloquée par LinkedIn n’est pas répétée le même jour.
+
+Une ancienne tâche est détectée dans l’interface. Il faut activer la nouvelle configuration pour la remplacer ; sa simple détection ne change pas le système. En cas d’échec d’installation de la nouvelle tâche, l’application tente de restaurer le fichier et l’état précédents, sans déclencher l’ancien comportement d’envoi au chargement.
+
+Les nouvelles tâches écrivent leur journal dans un sous-dossier de `~/Library/Logs/Linkedin-connector/`, identifié à partir du chemin du dossier de données. macOS peut refuser à son lanceur l’ouverture d’un journal situé dans `Documents`, avant même que Python démarre. Réactiver l’automatisation remplace cette ancienne configuration ; l’historique déjà présent dans `linkedin_data/auto.log` reste consultable dans l’interface.
+
+Si la tâche appartient à une autre copie du projet ou utilise un autre dossier de données, l’interface le signale et bloque son remplacement. Ouvrez cette autre copie pour gérer sa planification.
+
+L’option avancée suivante active la même planification avec les réglages déjà enregistrés :
 
 ```bash
 ./install.sh --schedule
 ```
 
-La tâche se lance du lundi au vendredi à **10h30**, sans exécution immédiate lors de l'installation ni lancement à chaque ouverture de session. Pour un autre horaire :
-
-```bash
-HOUR=9 MINUTE=0 ./install.sh --schedule
-```
-
-Cette option utilise le mode historique `auto` : recherches prédéfinies en rotation si le stock est bas, vérification d'activité, puis jusqu'à 15 invitations aux profils éligibles et rapport e-mail si configuré. **Ce mode n'utilise pas la sélection manuelle ni les mots-clés saisis dans l'interface.** Il peut envoyer des invitations sans validation quotidienne. Le terminal du serveur web peut être fermé ; le compte doit rester connecté dans Chromium et la session macOS doit pouvoir ouvrir une fenêtre graphique.
-
-La tâche conserve le contrôle « une exécution réussie par jour ouvré ». Elle n'assure pas le rattrapage des jours où l'ordinateur était éteint. Les anciennes tâches peuvent encore être configurées pour se lancer à l'ouverture de session jusqu'à leur suppression ou leur remplacement explicite avec `--schedule`.
+Elle refuse une configuration absente ou des mots-clés vides. Si l’activation échoue, les envois restent en pause jusqu’à une activation réussie. Les anciennes variables `HOUR` et `MINUTE` ne pilotent plus l’horaire : modifiez-le dans l’interface. Cette option nécessite macOS et ne crée pas une configuration parallèle.
 
 | Action avancée | Commande |
 |---|---|
-| Voir le journal automatique | `tail -f linkedin_data/auto.log` |
+| Voir les journaux automatiques | `tail -f ~/Library/Logs/Linkedin-connector/*/auto.log` |
 | Inspecter la tâche | `launchctl print gui/$(id -u)/com.$(whoami).linkedin-connector` |
-| Supprimer la tâche | `./uninstall.sh` |
+| Supprimer la tâche en conservant les données | `./uninstall.sh` |
+
+`uninstall.sh` met les réglages en pause puis retire uniquement la tâche vérifiée de cette installation. Il refuse de modifier une tâche appartenant à une autre copie. Si une opération utilise encore LinkedIn, les envois passent en pause et le script demande d’attendre sa fin avant de retirer le calendrier.
+
+Sous Linux, le lanceur et les tests de recherche restent disponibles, mais l’activation de la planification macOS est indisponible. Aucun service système n’y est installé automatiquement.
 
 ## Commandes avancées
 
@@ -124,10 +197,10 @@ L'interface remplace les commandes pour l'utilisation courante. La CLI reste dis
 | Commande | Rôle | Options utiles |
 |---|---|---|
 | `login` | Connexion manuelle à LinkedIn | |
-| `find` | Recherche et enregistrement des prospects | `--keywords "..."`, `--segments founder,sales`, `--pages 2`, `--paris`, `--network S,O` |
+| `find` | Recherche et enregistrement des prospects | `--keywords "..."`, `--segments founder,sales`, `--pages 2`, `--international`, `--network S,O` |
 | `enrich` | Vérification de l'activité récente | `--top 30`, `--min-score 40` |
 | `run` | Invitations aux prospects éligibles | `--dry-run`, `--limit 3`, `--active-only`, `--min-score 40`, `--note` |
-| `auto` | Pipeline quotidien avec envoi, sans sélection manuelle | `--force`, `--limit`, `--enrich`, `--note` |
+| `auto` | Recherche et envoi selon les réglages enregistrés dans l’interface | `--force`, `--enrich` |
 | `rescore` | Recalcul des scores | |
 
 Exemple sans envoi :
@@ -136,7 +209,9 @@ Exemple sans envoi :
 .venv/bin/python linkedin_connect.py run --dry-run
 ```
 
-`run` sans `--dry-run` et `auto` effectuent de vrais envois. `auto --force` ignore le contrôle du jour ouvré et de l'exécution quotidienne, mais pas les plafonds d'invitations.
+`run` sans `--dry-run` effectue de vrais envois avec ses options CLI. `auto` effectue de vrais envois uniquement lorsque l’automatisation enregistrée est active. `auto --force` ignore la restriction aux jours ouvrés et le contrôle d’exécution quotidienne, mais conserve le ciblage enregistré, la pause, les mots-clés obligatoires et les plafonds d’invitations. Les options `--limit` et `--note` sont réservées au mode manuel `run` ; le mode `auto` lit ces valeurs dans les réglages de l’interface.
+
+La recherche CLI cible la France par défaut. `find --international` retire le filtre géographique. L'ancienne option `--paris` reste disponible en CLI, mais ne peut pas être combinée avec `--international`. Les anciens réglages France ou Paris de l'interface deviennent France, en conservant les autres paramètres.
 
 ## Ciblage et score
 
@@ -155,9 +230,9 @@ Le score, entre 0 et 100, correspond au ciblage initial du projet : décideurs d
 | Développeur ou freelance / étudiant | −50 / −50 |
 | Recruteur / recherche d'emploi / grand groupe | −40 / −30 / −20 |
 
-Le seuil par défaut est **40**. Les segments prédéfinis sont `founder`, `pme`, `sales`, `growth` et `entrepreneur`.
+Le seuil par défaut est **40**, modifiable dans les réglages avancés de l’interface. Les segments prédéfinis `founder`, `pme`, `sales`, `growth` et `entrepreneur` restent disponibles uniquement pour les recherches CLI qui les demandent.
 
-Les règles avancées restent en haut de `linkedin_connect.py` : `QUERIES`, `SIGNALS`, `PENALTIES`, `NOTE_TEMPLATE`, `DAILY_CAP`, `WEEKLY_CAP`, `DELAY_RANGE` et `MIN_SCORE`. Après une modification du score, utilisez l'action de recalcul. La note personnalisée du mode CLI nécessite aussi d'adapter son texte à votre activité.
+Les règles avancées restent en haut de `linkedin_connect.py` : `QUERIES`, `SIGNALS`, `PENALTIES`, `NOTE_TEMPLATE`, `DAILY_CAP`, `WEEKLY_CAP`, `DELAY_RANGE` et `MIN_SCORE`. Après une modification du score, utilisez l'action de recalcul. Le texte de la note reste défini par `NOTE_TEMPLATE` ; l’interface permet de le consulter et de choisir de le joindre ou non.
 
 ## Dépannage
 
@@ -167,7 +242,9 @@ Les règles avancées restent en haut de `linkedin_connect.py` : `QUERIES`, `SIG
 | Le port est déjà occupé | Arrêtez l'ancienne instance ou utilisez `./install.sh --port 8877`. |
 | Téléchargement interrompu ou réseau indisponible | Rétablissez la connexion puis relancez `./install.sh`. Les dépendances présentes sont conservées. |
 | Permission refusée pour `./install.sh` après extraction d'une archive | Utilisez `bash install.sh`, ou restaurez le droit d'exécution avec `chmod +x install.sh`. |
-| Session LinkedIn expirée | Reconnectez LinkedIn depuis l'interface. |
+| Session LinkedIn expirée | Reconnectez LinkedIn depuis l’interface ; les prochaines exécutions pourront réutiliser la session. |
+| Aucun envoi automatique | Vérifiez l’état actif, les mots-clés, les jours et l’heure, la dernière exécution et le journal `auto.log`. Le Mac et la session macOS doivent être disponibles. |
+| Activation impossible | Consultez le message de l’interface. La planification exige macOS, des mots-clés et aucun autre travail LinkedIn en cours. |
 | Limite ou vérification LinkedIn détectée | Arrêtez les actions et effectuez manuellement la vérification demandée par LinkedIn. |
 | Recherche vide ou nombreux statuts `no_connect_button` / `error_*` | Vérifiez les mots-clés, les filtres et la session ; les sélecteurs peuvent aussi nécessiter une adaptation à LinkedIn. |
 | Aucun rapport e-mail | Vérifiez la configuration facultative `.env` et le journal du mode `auto`. |
@@ -175,6 +252,8 @@ Les règles avancées restent en haut de `linkedin_connect.py` : `QUERIES`, `SIG
 | Linux sans affichage graphique | Utilisez une session de bureau : la connexion manuelle nécessite une fenêtre Chromium. |
 
 ## Vérifications et améliorations restantes
+
+La [revue qualité de la version 1.0.0](docs/QUALITE.md) décrit les corrections UX, les parcours vérifiés et les limites de ces essais.
 
 Les tests isolés s'exécutent avec :
 
@@ -190,12 +269,16 @@ Pour vérifier aussi l'interface dans Chromium avec des profils fictifs et sans 
 .venv/bin/python scripts/smoke_ui.py
 ```
 
-Ce contrôle couvre l'état vide, la sauvegarde des réglages, la sélection, un aperçu réel sans envoi, l'annulation de la confirmation et l'affichage mobile. Il écrit deux captures de test dans `/tmp/`.
+Ce contrôle utilise une planification simulée et des profils fictifs pour vérifier la configuration, le test de recherche sans envoi et l’affichage mobile. Les tests du planificateur vérifient les horaires, les sept jours ou les jours ouvrés, la pause et la restauration après échec. Aucune tâche launchd réelle ni invitation LinkedIn n’est déclenchée par les tests.
 
-Les principales améliorations apportées sont le démarrage en une commande, l'installation de Python si nécessaire, l'interface locale, la sélection explicite avant envoi, la gestion des actions longues et la désactivation de toute nouvelle planification par défaut.
+Pour inspecter les mêmes données fictives dans un navigateur déjà ouvert, utilisez `.venv/bin/python scripts/smoke_ui.py --serve`, puis ouvrez `http://127.0.0.1:8878`. Le bandeau « Mode démonstration » confirme que cette page ne pilote pas votre compte. Les tests GitHub Actions exécutent aussi le parcours de l’interface dans un navigateur de test isolé.
 
-Les limites qui restent à traiter sont la fragilité des sélecteurs LinkedIn, le score et la note encore définis dans le code, et la reproductibilité des versions mineures des dépendances. Les recherches enrichissent un CSV commun, ce qui rend nécessaire la sélection explicite des profils à chaque envoi.
+Les principales améliorations apportées sont le démarrage en une commande, l’installation de Python si nécessaire, la configuration centralisée dans l’interface et l’envoi quotidien limité aux recherches actuelles. Le contrôle de concurrence empêche la CLI, l’interface et l’automatisation d’utiliser simultanément la même session.
+
+Les limites qui restent à traiter sont la fragilité des sélecteurs LinkedIn, les règles de score et le texte de la note encore définis dans le code, et la reproductibilité des versions mineures des dépendances.
 
 Le statut `sent` est enregistré après le clic d'envoi, sans confirmation indépendante du serveur LinkedIn. Une interruption au moment du clic peut donc laisser un résultat ambigu : vérifiez sur LinkedIn avant de retenter. Les plafonds se fondent sur le journal local et ne comptabilisent pas toutes les invitations envoyées manuellement ailleurs.
 
 Le fonctionnement dépend d'une session LinkedIn valide et de son interface, qui peut changer. LinkedIn interdit les outils d'automatisation non autorisés et peut restreindre le compte ; les pauses et plafonds du projet ne constituent pas une garantie. Voir [l'aide officielle sur les logiciels interdits](https://www.linkedin.com/help/linkedin/answer/a1341387).
+
+</details>

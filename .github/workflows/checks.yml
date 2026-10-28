@@ -1,0 +1,49 @@
+name: Vérifications
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests locaux (${{ matrix.os }}, Python ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.10'
+          - os: ubuntu-latest
+            python: '3.14'
+          - os: macos-latest
+            python: '3.12'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Dépendances
+        run: python -m pip install -r requirements.txt
+      - name: Syntaxe des lanceurs
+        run: bash -n install.sh uninstall.sh Démarrer.command
+      - name: Tests isolés, sans LinkedIn
+        run: python -m unittest discover -s tests -v
+
+  interface:
+    name: Parcours interface (profils fictifs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Dépendances et navigateur de test
+        run: |
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Parcours utilisateur, clavier et responsive
+        run: python scripts/smoke_ui.py

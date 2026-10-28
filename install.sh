@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installe les dépendances manquantes puis ouvre l'interface locale.
-set -euo pipefail
+set -Eeuo pipefail
 
 cd "$(dirname "$0")"
 PROJECT_DIR="$(pwd -P)"
@@ -11,6 +11,17 @@ INSTALL_ONLY=0
 NO_BROWSER=0
 SCHEDULE=0
 UV_BIN=""
+INSTALL_STEP="préparation"
+
+installation_error() {
+  local status="$?"
+  printf '\nLe démarrage s’est arrêté pendant cette étape : %s.\n' "$INSTALL_STEP" >&2
+  printf 'Le détail de l’erreur se trouve juste au-dessus.\n' >&2
+  printf 'Vous pouvez relancer Démarrer.command ou ./install.sh après correction.\n' >&2
+  printf 'Vos réglages et votre historique sont conservés.\n' >&2
+  exit "$status"
+}
+trap installation_error ERR
 
 usage() {
   cat <<'EOF'
@@ -22,8 +33,8 @@ actif dans ce terminal. Ctrl+C l'arrête. Aucune invitation n'est envoyée au d�
   --port PORT       Port local (8765 par défaut)
   --no-browser      Démarre le serveur sans ouvrir un onglet
   --install-only    Installe les dépendances sans lancer le serveur
-  --schedule        Active explicitement la tâche macOS du lundi au vendredi
-                    (HOUR=10 MINUTE=30 par défaut, aucun lancement immédiat)
+  --schedule        Active la tâche macOS avec les réglages enregistrés dans
+                    l'interface (mots-clés obligatoires, aucun envoi immédiat)
   --no-schedule     Compatibilité : aucun changement de planification
   -h, --help        Affiche cette aide
 EOF
@@ -57,16 +68,21 @@ esac
 
 if [ "$SCHEDULE" -eq 1 ]; then
   [ "$PLATFORM" = Darwin ] || fail "--schedule utilise launchd et nécessite macOS."
-  SCHEDULE_HOUR="${HOUR:-10}"
-  SCHEDULE_MINUTE="${MINUTE:-30}"
-  [[ "$SCHEDULE_HOUR" =~ ^[0-9]{1,2}$ ]] || fail "HOUR doit être entre 0 et 23."
-  [[ "$SCHEDULE_MINUTE" =~ ^[0-9]{1,2}$ ]] || fail "MINUTE doit être entre 0 et 59."
-  SCHEDULE_HOUR=$((10#$SCHEDULE_HOUR))
-  SCHEDULE_MINUTE=$((10#$SCHEDULE_MINUTE))
-  ((SCHEDULE_HOUR <= 23 && SCHEDULE_MINUTE <= 59)) || fail "Horaire invalide (HOUR 0..23, MINUTE 0..59)."
 fi
 
+printf '\nLinkedIn Connector\n'
+printf 'La première installation peut prendre plusieurs minutes. Gardez cette fenêtre ouverte.\n'
+printf 'Aucune invitation n’est envoyée par ce démarrage.\n\n'
+printf '[1/4] Préparation des outils nécessaires\n'
+INSTALL_STEP="préparation des outils nécessaires"
+
 python_usable() {
+  # Le Python fourni comme raccourci par macOS peut ouvrir une demande d’outils
+  # développeur. Sans ces outils, le Python local installé ci-dessous suffit.
+  if [ "$PLATFORM" = Darwin ] && [ "$(command -v "$1" || true)" = /usr/bin/python3 ] \
+    && ! /usr/bin/xcode-select -p >/dev/null 2>&1; then
+    return 1
+  fi
   "$1" -c 'import sys, venv; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1
 }
 
@@ -146,6 +162,8 @@ if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
   fi
 fi
 
+printf '\n[2/4] Vérification des composants de l’application\n'
+INSTALL_STEP="installation des composants (vérifiez votre connexion Internet)"
 if "$VENV_PY" scripts/check_install.py dependencies requirements.txt; then
   printf '✓ Dépendances Python déjà installées\n'
 else
@@ -155,6 +173,8 @@ else
     || fail "Les dépendances Python ne sont pas utilisables après installation."
 fi
 
+printf '\n[3/4] Vérification du navigateur utilisé pour LinkedIn\n'
+INSTALL_STEP="installation du navigateur (vérifiez votre connexion Internet)"
 if "$VENV_PY" scripts/check_install.py chromium; then
   printf '✓ Chromium déjà installé\n'
 else
@@ -165,24 +185,26 @@ else
 fi
 
 if [ "$SCHEDULE" -eq 1 ]; then
-  LABEL="com.$(whoami).linkedin-connector"
-  PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-  mkdir -p "$HOME/Library/LaunchAgents" "$PROJECT_DIR/linkedin_data"
-  "$VENV_PY" scripts/check_install.py schedule "$PROJECT_DIR" "$LABEL" "$PLIST" "$SCHEDULE_HOUR" "$SCHEDULE_MINUTE"
-  plutil -lint "$PLIST" >/dev/null
-  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST"
-  printf '✓ Tâche activée du lundi au vendredi à %02dh%02d (sans lancement immédiat)\n' "$SCHEDULE_HOUR" "$SCHEDULE_MINUTE"
+  INSTALL_STEP="activation de l’automatisation avec vos réglages enregistrés"
+  "$VENV_PY" scripts/check_install.py schedule "$PROJECT_DIR"
 elif [ "$PLATFORM" = Darwin ]; then
   LABEL="com.$(whoami).linkedin-connector"
   if [ -f "$HOME/Library/LaunchAgents/$LABEL.plist" ]; then
-    printf 'Note : une ancienne tâche planifiée existe ; elle reste inchangée.\n'
-    printf 'Pour la retirer : ./uninstall.sh\n'
+    printf 'Note : une tâche planifiée existe. Son état et ses réglages sont disponibles dans l’interface.\n'
   fi
 fi
 
 printf '\n✓ Installation prête.\n'
-[ "$INSTALL_ONLY" -eq 0 ] || exit 0
+if [ "$INSTALL_ONLY" -eq 1 ]; then
+  printf '[4/4] Installation terminée. Ouvrez Démarrer.command ou lancez ./install.sh pour continuer.\n'
+  exit 0
+fi
+
+printf '[4/4] Ouverture de l’application\n'
+printf 'Si la page ne s’ouvre pas, copiez cette adresse dans votre navigateur :\n'
+printf '  http://127.0.0.1:%s\n\n' "$LOCAL_PORT"
+printf 'Les mots-clés, l’heure et la pause se règlent sur cette page.\n'
+printf 'Gardez cette fenêtre ouverte tant que vous utilisez la page.\n\n'
 
 SERVER_ARGS=(--port "$LOCAL_PORT")
 [ "$NO_BROWSER" -eq 0 ] || SERVER_ARGS+=(--no-browser)
